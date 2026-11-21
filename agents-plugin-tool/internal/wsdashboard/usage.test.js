@@ -239,12 +239,17 @@ test('stale cards neutralize only the current marker and freeze pace without rec
 test('usage ordering, expired windows, thresholds and ages', () => {
   const u = environment().window.WsUsage;
   const entries = [
-    { harness: 'claude', windows: [{ percent: 99, resetsAt: 5 }, { percent: 40, resetsAt: 50 }] },
-    { harness: 'codex', windows: [{ percent: 80, resetsAt: 50 }] }
+    { harness: 'agy', group: 'claude_gpt', windows: [{ percent: 95, resetsAt: 50 }] },
+    { harness: 'codex', windows: [{ percent: 80, resetsAt: 50 }] },
+    { harness: 'agy', group: 'gemini', windows: [{ percent: 15, resetsAt: 50 }] },
+    { harness: 'claude', windows: [{ percent: 99, resetsAt: 5 }, { percent: 40, resetsAt: 50 }] }
   ];
-  assert.equal(u.sorted(entries, 10)[0].harness, 'codex');
-  assert.equal(entries[0].harness, 'claude');
-  assert.equal(u.active(entries[0], 10).length, 1);
+  assert.deepEqual(
+    u.sorted(entries).map(e => e.group ? e.harness + ':' + e.group : e.harness),
+    ['claude', 'codex', 'agy:gemini', 'agy:claude_gpt']
+  );
+  assert.equal(entries[0].harness, 'agy');
+  assert.equal(u.active(entries[3], 10).length, 1);
   for (const [p, want] of [[79, 'normal'], [80, 'warning'], [94, 'warning'], [95, 'critical']]) assert.equal(u.level(p, 80, 95), want);
   assert.equal(u.age(60000, 180000), 'value from 2 min ago');
   assert.equal(u.age(0, 180000), 'usage unavailable');
@@ -264,8 +269,11 @@ test('footer and popover show detected harnesses, age, reset and safe text but h
   assert.equal(groups(env.button)[1].querySelector('.usage-number').textContent, '96%');
   const pop = mounted.makePopover(() => {}, () => {}); pop.open(); pop.focus(); await flush();
   const text = pop.el.textContent;
-  assert.ok(text.indexOf('Codex / GPT') < text.indexOf('Claude'));
-  for (const s of ['96%', 'Weekly', '5-hour', 'value from 0 min ago', 'Resets ', '<fake-plan>', 'Pi token expired']) assert.ok(text.includes(s), s);
+  assert.ok(text.indexOf('Claude') < text.indexOf('Codex / GPT'));
+  for (const s of ['96%', 'Weekly', '5-hour', '0m ago', '<fake-plan>', 'Pi token expired']) assert.ok(text.includes(s), s);
+  const resetEl = pop.el.querySelector('.usage-reset');
+  assert.ok(resetEl.textContent.startsWith('↻ '));
+  assert.ok(resetEl.title.startsWith('Resets '));
   for (const source of ['via Pi', 'Claude push']) assert.ok(!text.includes(source), source);
   assert.equal(pop.el.attributes.role, 'dialog');
   assert.equal(pop.el.focused, true);
@@ -408,7 +416,7 @@ test('opening during an ordinary pending request queues one forced refresh and i
   pop.open(); // already-forced request must not queue another probe
   finish(); await flush();
   assert.equal(env.calls.length, 2);
-  assert.deepEqual(env.timers.filter(t => t.live).map(t => t.ms), [2000, 11000]);
+  assert.deepEqual(env.timers.filter(t => t.live).map(t => t.ms), [2000, 11000, 32000]);
 });
 
 test('a forced refresh refetches while the popover is open, so the background probe result shows', async () => {
@@ -416,20 +424,47 @@ test('a forced refresh refetches while the popover is open, so the background pr
   const entry = percent => ({ entries: [{ harness: 'codex', asOf: at, windows: [{ kind: 'seven_day', percent, asOf: at, resetsAt: at + 86400000 }] }] });
   env.set(entry(10));
   const mounted = env.window.WsUsage.mount(env.doc, env.top); await flush();
-  assert.equal(env.timers.length, 0); // an ordinary poll schedules no follow-up
+  assert.equal(env.timers.filter(t => [2000, 11000, 32000].includes(t.ms)).length, 0); // an ordinary poll schedules no follow-up
   const pop = mounted.makePopover(() => {}, () => {}); pop.open(); await flush();
   assert.equal(env.calls.at(-1).url, '/rail/usage?history=1&refresh=1');
-  assert.deepEqual(env.timers.map(t => t.ms), [2000, 11000]);
+  assert.deepEqual(env.timers.filter(t => t.live && [2000, 11000, 32000].includes(t.ms)).map(t => t.ms), [2000, 11000, 32000]);
   env.set(entry(42)); // the daemon's background probe lands
-  env.timers[0].fn(); await flush();
+  env.timers.find(t => t.live && t.ms === 2000).fn(); await flush();
   assert.equal(env.calls.at(-1).url, '/rail/usage?history=1');
   assert.ok(pop.el.textContent.includes('42%'));
   assert.equal(env.button.querySelector('.usage-number').textContent, '42%');
   pop.open(); await flush(); // reopening replaces, not stacks, the follow-ups
-  assert.deepEqual(env.timers.filter(t => t.live).map(t => t.ms), [2000, 11000]);
+  assert.deepEqual(env.timers.filter(t => t.live && [2000, 11000, 32000].includes(t.ms)).map(t => t.ms), [2000, 11000, 32000]);
   const before = env.calls.length;
   pop.close(); env.timers.at(-1).fn(); await flush();
   assert.equal(env.calls.length, before); // a closed popover does not refetch
+});
+
+test('nearest reset timer redraws expired windows and refreshes usage', async () => {
+  const at = Date.UTC(2026, 10, 15), reset = at + 1000, env = environment(at);
+  env.set({ entries: [{ harness: 'claude', asOf: at, windows: [{ kind: 'five_hour', percent: 42, asOf: at, resetsAt: reset }] }] });
+  env.window.WsUsage.mount(env.doc, env.top); await flush();
+  assert.equal(env.button.querySelector('.usage-number').textContent, '42%');
+  const timer = env.timers.find(t => t.live && t.ms === 1100);
+  assert.ok(timer, 'reset redraw includes the 100ms expiry margin');
+  env.now(reset + 100); timer.fn();
+  assert.equal(env.button.querySelector('.usage-number'), null);
+  assert.ok(env.button.textContent.includes('usage unavailable'));
+  await flush();
+  assert.equal(env.calls.length, 2);
+  assert.equal(env.calls[1].url, '/rail/usage?history=1');
+});
+
+test('popover header age uses the oldest displayed window observation', async () => {
+  const now = Date.UTC(2026, 10, 15, 12), env = environment(now);
+  env.set({ entries: [{ harness: 'claude', asOf: now - 60000, windows: [
+    { kind: 'five_hour', percent: 20, asOf: now - 12 * 60000, resetsAt: now + 3600000 },
+    { kind: 'seven_day', percent: 30, asOf: now - 3 * 60000, resetsAt: now + 86400000 }
+  ] }] });
+  const mounted = env.window.WsUsage.mount(env.doc, env.top); await flush();
+  const pop = mounted.makePopover(() => {}, () => {}); pop.open(); await flush();
+  assert.equal(pop.el.querySelector('.usage-vage').textContent, '12m ago');
+  assert.equal(pop.el.querySelector('.usage-vage').title, 'value from 12 min ago');
 });
 
 test('handle redraw and sync preserve the sibling alert slot', async () => {
@@ -478,7 +513,8 @@ test('the header handle keeps one row: small badge marks clear of the columns, a
   assert.match(rule('.dwrap > .top.tu .tcen > .usage-toggle'), /width: 34px/);
   assert.match(rule('.dwrap > .top.tu .tcen > .usage-toggle > :not(.usage-mini)'), /display: none/);
   assert.match(rule('.dwrap > .top.tu .tcen > .usage-toggle > .usage-mini'), /display: inline-flex/);
-  assert.doesNotMatch(css, /overflow:\s*hidden|text-overflow:\s*ellipsis/);
+  const handleCss = css.slice(0, css.indexOf('.rpop.usage-pop'));
+  assert.doesNotMatch(handleCss, /overflow:\s*hidden|text-overflow:\s*ellipsis/);
 });
 
 test('the handle marks each harness with the small badge and leads with the compact trigger', async () => {
@@ -514,4 +550,174 @@ test('empty login state and hidden-page cadence', async () => {
   const before = env.calls.length;
   env.doc.hidden = true; env.ticks[0].fn(); await flush(); assert.equal(env.calls.length, before);
   env.doc.hidden = false; env.doc.events.visibilitychange(); await flush(); assert.equal(env.calls.length, before + 1);
+});
+
+test('agy renders two per-group entries with shared badge, visible footer age, and disabled-bucket rules', async () => {
+  const at = Date.UTC(2026, 10, 19, 12, 0), observed = at - 12 * 60000, env = environment(at);
+  const reset5h = observed + 3 * 3600000, resetWk = observed + 4 * 86400000;
+  env.set({
+    entries: [
+      { harness: 'claude', asOf: at, windows: [{ kind: 'five_hour', percent: 25, asOf: at, resetsAt: reset5h }] },
+      { harness: 'agy', group: 'gemini', label: 'Gemini Models', source: 'via agy CLI', asOf: observed, windows: [
+        { kind: 'five_hour', percent: 40, asOf: observed, resetsAt: reset5h },
+        { kind: 'seven_day', percent: 55, asOf: observed, resetsAt: resetWk }
+      ] },
+      { harness: 'agy', group: 'claude_gpt', label: 'Claude and GPT models', source: 'via agy CLI', asOf: observed, windows: [
+        { kind: 'five_hour', percent: 80, asOf: observed, resetsAt: reset5h, disabled: true },
+        { kind: 'seven_day', percent: 30, asOf: observed, resetsAt: resetWk }
+      ] }
+    ],
+    agyHistory: { schema_version: 1, status: 'ok', samples: [
+      { harness: 'agy', group: 'gemini', kind: 'five_hour', source: 'via agy CLI', resetsAt: reset5h, asOf: observed - 20 * 60000, percent: 15 },
+      { harness: 'agy', group: 'gemini', kind: 'five_hour', source: 'via agy CLI', resetsAt: reset5h, asOf: observed, percent: 40 },
+      { harness: 'agy', group: 'claude_gpt', kind: 'seven_day', source: 'via agy CLI', resetsAt: resetWk, asOf: observed - 3600000, percent: 10 },
+      { harness: 'agy', group: 'claude_gpt', kind: 'seven_day', source: 'via agy CLI', resetsAt: resetWk, asOf: observed, percent: 30 }
+    ] }
+  });
+  const mounted = env.window.WsUsage.mount(env.doc, env.top); await flush();
+  const footerGroups = groups(env.button);
+  assert.equal(footerGroups.length, 3);
+  const agyFooter = footerGroups.slice(1);
+  assert.deepEqual(agyFooter.map(g => g.querySelector('.hb').attributes['data-h']), ['agy', 'agy']);
+  assert.deepEqual(agyFooter.map(g => g.querySelector('.usage-group-label').textContent), ['Gemini', 'Claude/GPT']);
+  assert.deepEqual(agyFooter.map(g => g.querySelector('.usage-group-age').textContent), ['12m ago', '12m ago']);
+  assert.equal(agyFooter[0].querySelector('.usage-group-age').title, 'value from 12 min ago');
+  assert.equal(agyFooter[0].querySelector('.usage-columns').children.length, 2);
+  assert.equal(agyFooter[1].querySelector('.usage-columns').children.length, 1);
+  assert.equal(agyFooter[1].querySelector('.usage-number').textContent, '30%');
+
+  const pop = mounted.makePopover(() => {}, () => {}); pop.open(); await flush();
+  const sections = nodes(pop.el, '.usage-account');
+  assert.equal(sections.length, 3);
+  const titles = sections.map(s => s.querySelector('.usage-heading').textContent);
+  assert.ok(titles.includes('Gemini Models'));
+  assert.ok(titles.includes('Claude and GPT models'));
+  assert.equal(sections.filter(s => s.querySelector('.hb').attributes['data-h'] === 'agy').length, 2);
+  const cgSection = sections.find(s => s.querySelector('.usage-heading').textContent === 'Claude and GPT models');
+  const cgCards = nodes(cgSection, '.usage-window-card');
+  assert.equal(cgCards.length, 2);
+  assert.ok(cgCards[0].className.includes('usage-disabled'));
+  assert.equal(cgCards[0].querySelector('.usage-disabled-tag').textContent, 'disabled');
+  assert.ok(!cgCards[1].className.includes('usage-disabled'));
+  const gemSection = sections.find(s => s.querySelector('.usage-heading').textContent === 'Gemini Models');
+  assert.ok(nodes(nodes(gemSection, '.usage-window-card')[0], '.usage-actual').length >= 1);
+  assert.equal(nodes(cgCards[0], '.usage-actual').length, 0);
+
+  env.set({ entries: [
+    { harness: 'agy', group: 'gemini', label: 'Gemini Models', source: 'via agy CLI', asOf: observed, windows: [
+      { kind: 'five_hour', percent: 40, asOf: observed, resetsAt: reset5h, disabled: true }
+    ] }
+  ] });
+  env.ticks[0].fn(); await flush();
+  assert.equal(groups(env.button).length, 0);
+  assert.equal(env.button.textContent, 'Plan usage');
+  pop.close();
+});
+
+test('agy sign-in required status localizes and D15 32s cache-only follow-up clears on close', async () => {
+  const at = Date.UTC(2026, 10, 19, 12, 0), env = environment(at, 'en');
+  env.set({ entries: [{ harness: 'agy', source: 'via agy CLI', status: 'sign-in required', windows: [] }] });
+  const mounted = env.window.WsUsage.mount(env.doc, env.top); await flush();
+  assert.equal(groups(env.button).length, 1);
+  assert.equal(groups(env.button)[0].querySelector('.hb').attributes['data-h'], 'agy');
+  assert.ok(groups(env.button)[0].textContent.includes('sign-in required'));
+  const pop = mounted.makePopover(() => {}, () => {}); pop.open(); await flush();
+  assert.ok(pop.el.textContent.includes('Antigravity'));
+  assert.ok(pop.el.textContent.includes('sign-in required'));
+
+  const live32 = env.timers.find(t => t.live && t.ms === 32000);
+  assert.ok(live32, '32s follow-up timer scheduled');
+  live32.fn(); await flush();
+  assert.equal(env.calls.at(-1).url, '/rail/usage?history=1');
+  assert.ok(!env.calls.at(-1).options.headers['X-WS-Usage-Refresh']);
+
+  pop.close();
+  assert.equal(env.timers.filter(t => t.live).length, 0);
+  const callsAfterClose = env.calls.length;
+  live32.fn(); await flush();
+  assert.equal(env.calls.length, callsAfterClose);
+});
+
+test('agy pending groups reserve both chart slots and are replaced by probe data', async () => {
+  const at = Date.UTC(2026, 10, 19, 12, 0), env = environment(at, 'en');
+  const pending = [
+    { harness: 'agy', group: 'gemini', label: 'Gemini Models', pending: true, windows: [] },
+    { harness: 'agy', group: 'claude_gpt', label: 'Claude and GPT models', pending: true, windows: [] }
+  ];
+  env.set({ entries: pending });
+  const mounted = env.window.WsUsage.mount(env.doc, env.top); await flush();
+  assert.equal(groups(env.button).length, 0);
+  assert.equal(env.button.textContent, 'Plan usage');
+
+  const pop = mounted.makePopover(() => {}, () => {}); pop.open(); await flush();
+  assert.equal(nodes(pop.el, '.usage-vendor-bracket')[0].textContent, 'Antigravity· 2 model groups');
+  const placeholders = nodes(pop.el, '.usage-pending-card');
+  assert.equal(placeholders.length, 4);
+  assert.deepEqual(placeholders.map(card => card.attributes['data-kind']), ['five_hour', 'seven_day', 'five_hour', 'seven_day']);
+  assert.ok(placeholders.every(card => card.attributes['aria-label'] === 'Checking usage…' && card.attributes['aria-busy'] === 'true'));
+  assert.equal(nodes(pop.el, '.spin').length, 4);
+
+  const usageWindow = (kind, percent) => ({ kind, percent, asOf: at, resetsAt: at + 3600000 });
+  env.set({ entries: [
+    { harness: 'agy', group: 'gemini', label: 'Gemini Models', asOf: at, windows: [usageWindow('five_hour', 30), usageWindow('seven_day', 40)] },
+    { harness: 'agy', group: 'claude_gpt', label: 'Claude and GPT models', asOf: at, windows: [usageWindow('five_hour', 50), usageWindow('seven_day', 60)] }
+  ] });
+  const early = env.timers.find(timer => timer.live && timer.ms === 2000);
+  assert.ok(early, '2s cache-only follow-up scheduled');
+  early.fn(); await flush();
+  assert.equal(nodes(pop.el, '.usage-pending-card').length, 0);
+  assert.equal(nodes(pop.el, '.usage-window-card').length, 4);
+  assert.deepEqual(nodes(pop.el, '.usage-number').map(node => node.textContent), ['30%', '40%', '50%', '60%']);
+
+  const dashboardCss = fs.readFileSync(__dirname + '/assets/dashboard.css', 'utf8');
+  assert.match(dashboardCss, /:root\[data-animation-paused\][^{]*\.spin/);
+  assert.match(dashboardCss, /@media \(prefers-reduced-motion: reduce\) \{ \.spin[^}]*animation: none/);
+  pop.close();
+});
+
+test('popover and gutter follow fixed vendor order with adjacent agy groups regardless of utilization', async () => {
+  const at = Date.UTC(2026, 10, 19, 12, 0), reset = at + 3 * 3600000, env = environment(at);
+  env.set({
+    entries: [
+      { harness: 'agy', group: 'claude_gpt', label: 'Claude and GPT models', source: 'via agy CLI', asOf: at, windows: [{ kind: 'five_hour', percent: 96, asOf: at, resetsAt: reset }] },
+      { harness: 'codex', source: 'via Codex CLI', asOf: at, windows: [{ kind: 'seven_day', percent: 88, asOf: at, resetsAt: reset }] },
+      { harness: 'agy', group: 'gemini', label: 'Gemini Models', source: 'via agy CLI', asOf: at, windows: [{ kind: 'five_hour', percent: 12, asOf: at, resetsAt: reset }] },
+      { harness: 'claude', source: 'Claude push', asOf: at, windows: [{ kind: 'five_hour', percent: 5, asOf: at, resetsAt: reset }] }
+    ]
+  });
+  const mounted = env.window.WsUsage.mount(env.doc, env.top); await flush();
+  const footerTitles = groups(env.button).map(g => g.title);
+  assert.deepEqual(footerTitles, ['Claude', 'Codex / GPT', 'Gemini Models', 'Claude and GPT models']);
+  const pop = mounted.makePopover(() => {}, () => {}); pop.open(); await flush();
+  const popTitles = nodes(pop.el, '.usage-account').map(s => s.querySelector('.usage-heading').textContent);
+  assert.deepEqual(popTitles, ['Claude', 'Codex / GPT', 'Gemini Models', 'Claude and GPT models']);
+  pop.close();
+});
+
+test('popover uses window rows, transposed container rules and a localized missing-window slot', async () => {
+  const at = Date.UTC(2026, 10, 19, 12, 0), reset = at + 3 * 3600000, env = environment(at);
+  const window = (kind, percent) => ({ kind, percent, asOf: at, resetsAt: reset });
+  env.set({ entries: [
+    { harness: 'claude', plan: 'max', asOf: at, windows: [window('five_hour', 5), window('seven_day', 10)] },
+    { harness: 'codex', plan: 'pro', asOf: at, windows: [window('seven_day', 20)] },
+    { harness: 'agy', group: 'gemini', label: 'Gemini Models', asOf: at, windows: [window('five_hour', 30), window('seven_day', 40)] },
+    { harness: 'agy', group: 'claude_gpt', label: 'Claude and GPT models', asOf: at, windows: [window('five_hour', 50), window('seven_day', 60)] }
+  ] });
+  const mounted = env.window.WsUsage.mount(env.doc, env.top); await flush();
+  const pop = mounted.makePopover(() => {}, () => {}); pop.open(); await flush();
+  assert.equal(pop.el.attributes['data-cols'], '4');
+  const grid = pop.el.querySelector('.usage-details').querySelector('.usage-layout');
+  assert.equal(grid.tagName, 'div');
+  assert.deepEqual(nodes(pop.el, '.usage-row-label').map(n => n.textContent), ['5-hour5 h', 'Weekly7 d']);
+  assert.deepEqual(nodes(pop.el, '.usage-col-head').map(n => n.textContent), ['5-hour', 'Weekly']);
+  assert.equal(nodes(pop.el, '.usage-vendor-bracket')[0].textContent, 'Antigravity· 2 model groups');
+  const empty = nodes(pop.el, '.usage-window-empty');
+  assert.equal(empty.length, 1);
+  assert.equal(empty[0].attributes['data-kind'], 'five_hour');
+  assert.equal(empty[0].textContent, 'no 5-hour window');
+  const css = fs.readFileSync(__dirname + '/assets/usage.css', 'utf8');
+  assert.match(css, /@container usage-pop \(max-width: 956px\)/);
+  assert.match(css, /@container usage-pop \(max-width: 600px\)/);
+  assert.match(css, /@container usage-pop \(max-width: 336px\)/);
+  pop.close();
 });

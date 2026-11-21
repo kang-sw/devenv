@@ -1,5 +1,5 @@
 ---
-title: Native Windows attachment tests fail their absent-blob fetch and busy-read preconditions
+title: "네이티브 Windows 첨부파일 테스트의 부재 blob 조회 및 사용 중 읽기 사전 조건 실패"
 related:
   261110-bug-ws-tracker-store-lock-network-split: completed busy-read contract predecessor; its result is not changed by this capture
 ---

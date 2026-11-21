@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsconfig"
+	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
 	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
@@ -19,10 +20,11 @@ import (
 // whiteboardFixture is one lead session in a fresh git repository, with the
 // shipped rsrc tree so refusals and manual renders read the real playbook.
 type whiteboardFixture struct {
-	s    *Server
-	key  string
-	root string
-	id   int
+	source *DashboardSessionSource
+	s      *Server
+	key    string
+	root   string
+	id     int
 }
 
 func newWhiteboardFixture(t *testing.T) *whiteboardFixture {
@@ -83,19 +85,6 @@ func (f *whiteboardFixture) replyID() string {
 
 func (f *whiteboardFixture) pageDir() string {
 	return filepath.Join(f.dir(), f.replyID())
-}
-
-func (f *whiteboardFixture) pagePath() string {
-	return filepath.Join(f.pageDir(), "index.html")
-}
-
-func (f *whiteboardFixture) stamp(t *testing.T) string {
-	t.Helper()
-	data, err := os.ReadFile(filepath.Join(f.pageDir(), "index.stamp.js"))
-	if err != nil {
-		t.Fatalf("read stamp: %v", err)
-	}
-	return string(data)
 }
 
 func (f *whiteboardFixture) embeds(t *testing.T, dir string) []string {
@@ -227,96 +216,6 @@ func TestToolDescriptionsNameRuntimeNamespace(t *testing.T) {
 	}
 }
 
-func TestWhiteboardUpdateRendersPageAndStampInOrder(t *testing.T) {
-	f := newWhiteboardFixture(t)
-	if _, err := os.Stat(f.dir()); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("no whiteboard folder may exist before the first render: %v", err)
-	}
-	if excludeEntries(t, f.root) != 0 {
-		t.Fatalf("no exclude entry may exist before the first render")
-	}
-	// Todo writes before the first render write nothing.
-	f.call(t, "todo.add", map[string]any{"key": "a", "title": "first"})
-	if _, err := os.Stat(f.dir()); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("a todo write before the first render must not create the folder")
-	}
-
-	var order []string
-	orig := whiteboardRename
-	whiteboardRename = func(from, to string) error {
-		if len(order) == 0 {
-			var committed struct {
-				State struct {
-					Seq int `json:"seq"`
-				} `json:"state"`
-				ItemOrder []int `json:"item_order"`
-			}
-			if err := json.Unmarshal(readFileForTest(t, filepath.Join(f.pageDir(), "meta.json")), &committed); err != nil {
-				t.Fatal(err)
-			}
-			if committed.State.Seq != 1 || len(committed.ItemOrder) != 2 {
-				t.Fatalf("output publication preceded the durable board commit: %+v", committed)
-			}
-		}
-		order = append(order, filepath.Base(to))
-		return orig(from, to)
-	}
-	defer func() { whiteboardRename = orig }()
-
-	text := f.update(t, `<wb:topic name="layout"><wb:add class="policy">
-<wb:title>Two columns?</wb:title>
-<wb:option>yes</wb:option>
-<wb:option>no</wb:option>
-<wb:recommend>a: reads faster</wb:recommend>
-</wb:add></wb:topic>
-<wb:topic name="layout"><wb:add class="technical">
-<wb:title>Sticky sidebar</wb:title>
-<wb:why>keeps todos visible</wb:why>
-</wb:add></wb:topic>`)
-	if got := resultLine(t, text, "ids: "); got != "(01), (02)" {
-		t.Fatalf("ids line = %q", got)
-	}
-	full := resultLine(t, text, "full: ")
-	rid := f.replyID()
-	if full != "ai-docs/whiteboards/"+rid+"/index.html" {
-		t.Fatalf("full path = %q", full)
-	}
-	if len(order) != 2 || order[0] != "index.html" || order[1] != "index.stamp.js" {
-		t.Fatalf("write order = %v, want page then stamp", order)
-	}
-	page, err := os.ReadFile(filepath.Join(f.root, full))
-	if err != nil || !strings.HasPrefix(string(page), "<!DOCTYPE html>") || !strings.Contains(string(page), "Two columns?") {
-		t.Fatalf("full page missing or wrong (%v):\n%.300s", err, page)
-	}
-	if !strings.Contains(string(page), `data-stamp="index.stamp.js"`) {
-		t.Fatalf("full page must poll its stamp")
-	}
-	if got := f.stamp(t); got != "wbStamp(\"1\");\n" {
-		t.Fatalf("stamp = %q", got)
-	}
-	if n := excludeEntries(t, f.root); n != 1 {
-		t.Fatalf("exclude entries after first render = %d, want 1", n)
-	}
-	leftovers, _ := filepath.Glob(filepath.Join(f.dir(), ".*.tmp"))
-	if len(leftovers) != 0 {
-		t.Fatalf("temp files left behind: %v", leftovers)
-	}
-
-	// A second session in the same repository does not add the entry again.
-	key2, err := f.s.sessions.mint(f.root, roleLead, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resp := f.call(t, "whiteboard.update", map[string]any{"session_key": key2, "commands": ""}); isToolError(resp) {
-		t.Fatalf("second session update failed: %s", resp)
-	}
-	os.RemoveAll(f.dir())
-	f.update(t, ``)
-	if n := excludeEntries(t, f.root); n != 1 {
-		t.Fatalf("exclude entries after re-creating the folder = %d, want 1", n)
-	}
-}
-
 func TestWhiteboardUpdateWritesNoEmbedSnapshots(t *testing.T) {
 	f := newWhiteboardFixture(t)
 	for i := 0; i < 2; i++ {
@@ -352,65 +251,6 @@ func TestWhiteboardEmbedDirIsDeprecatedNoop(t *testing.T) {
 	}
 	if entries, err := os.ReadDir(host); err != nil || len(entries) != 0 {
 		t.Fatalf("deprecated command wrote host files: %v, %v", entries, err)
-	}
-}
-
-func TestWhiteboardRenameRetriesSharingViolation(t *testing.T) {
-	for _, target := range []string{"page", "stamp"} {
-		t.Run(target, func(t *testing.T) {
-			f := newWhiteboardFixture(t)
-			suffix := map[string]string{"page": "index.html", "stamp": "index.stamp.js"}[target]
-			sharing := errors.New("simulated sharing violation")
-			origRename, origRetryable, origBackoff := whiteboardRename, whiteboardRenameRetryable, whiteboardRenameBackoff
-			defer func() {
-				whiteboardRename, whiteboardRenameRetryable, whiteboardRenameBackoff = origRename, origRetryable, origBackoff
-			}()
-			whiteboardRenameRetryable = func(err error) bool { return errors.Is(err, sharing) }
-			whiteboardRenameBackoff = time.Millisecond
-			failures := 2
-			whiteboardRename = func(from, to string) error {
-				if filepath.Base(to) == suffix && failures > 0 {
-					failures--
-					return sharing
-				}
-				return origRename(from, to)
-			}
-			f.update(t, `<wb:topic name="t"><wb:add class="policy"><wb:title>x</wb:title></wb:add></wb:topic>`)
-			if failures != 0 || f.stamp(t) != "wbStamp(\"1\");\n" {
-				t.Fatalf("the %s rename must succeed after retries; failures left %d", target, failures)
-			}
-			for i := 0; i < 4; i++ {
-				f.update(t, ``)
-			}
-			// Publication follows the durable commit. An exhausted retry reports
-			// an error, keeps the accepted mutation, and leaves the old stamp.
-			beforeStamp := f.stamp(t)
-			whiteboardRename = func(from, to string) error {
-				if filepath.Base(to) == suffix {
-					return sharing
-				}
-				return origRename(from, to)
-			}
-			resp := f.call(t, "whiteboard.update", map[string]any{"commands": `<wb:topic name="t"><wb:add class="policy"><wb:title>committed-marker</wb:title></wb:add></wb:topic>`})
-			assertWhiteboardPublicationError(t, resp, "board committed; write "+map[string]string{"page": "full page", "stamp": "stamp"}[target])
-			rec, err := newSessionStore().readWhiteboard(f.key)
-			if err != nil || len(rec.Whiteboard.Items) != 2 || rec.Whiteboard.Seq != 6 {
-				t.Fatalf("a failed publication must keep its committed batch: %+v, %v", rec.Whiteboard, err)
-			}
-			if got := f.stamp(t); got != beforeStamp {
-				t.Fatalf("failed publication advanced the stamp: %q -> %q", beforeStamp, got)
-			}
-			entries := rec.Whiteboard.EntrySeq
-			whiteboardRename = origRename
-			f.update(t, ``)
-			repaired, err := newSessionStore().readWhiteboard(f.key)
-			if err != nil || len(repaired.Whiteboard.Items) != 2 || repaired.Whiteboard.EntrySeq != entries {
-				t.Fatalf("repair must not repeat the accepted mutation: %+v, %v", repaired.Whiteboard, err)
-			}
-			if f.stamp(t) != "wbStamp(\"7\");\n" || !strings.Contains(f.fullPage(t), "committed-marker") {
-				t.Fatal("a later render did not repair the page and stamp")
-			}
-		})
 	}
 }
 
@@ -546,8 +386,7 @@ func TestWhiteboardQueryAndTopicBodyThroughTools(t *testing.T) {
 <wb:topic name="t"><wb:body>
 background body-marker line
 </wb:body></wb:topic>`)
-	pagePath := f.pagePath()
-	page, _ := os.ReadFile(pagePath)
+	page := f.servedPage(t)
 	if body, item := strings.Index(string(page), "body-marker"), strings.Index(string(page), "settle me"); body < 0 || item < 0 || body < item {
 		t.Fatalf("a legacy body panel must render after the earlier item in write order (body %d, item %d)", body, item)
 	}
@@ -555,9 +394,10 @@ background body-marker line
 		t.Fatalf("the page must carry no Now slot")
 	}
 	f.update(t, `<wb:answer id="1" value="ok">(01) ok</wb:answer>`)
-	page, _ = os.ReadFile(pagePath)
-	if !strings.Contains(string(page), "body-marker") {
-		t.Fatalf("the body must survive an update that does not touch it")
+	// Once answered, the prior body is retained in lazy topic history.
+	history, ok := f.source.ReadTopicHistory(wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}, "", []string{"t"}, "")
+	if !ok || len(history) != 1 || !strings.Contains(string(history[0].HTML), "body-marker") {
+		t.Fatal("the body must survive in served history after an unrelated update")
 	}
 	// An id query defaults to depth summary: the settled item's answer only.
 	text := toolText(t, f.call(t, "whiteboard.query", map[string]any{"payload": map[string]any{"id": 1}}))
@@ -597,7 +437,7 @@ func TestWhiteboardUpdateResultHasNoNowFile(t *testing.T) {
 			t.Fatalf("update result must carry no now_file line:\n%s", text)
 		}
 	}
-	if whiteboardFilePattern.MatchString("abc.now.md") {
+	if retiredEmbedFile.MatchString("abc.now.md") {
 		t.Fatalf("the file pattern must not match .now.md")
 	}
 }
@@ -636,64 +476,11 @@ func TestWhiteboardUpdateResultCarriesStaleTopicNudge(t *testing.T) {
 	if got := resultLine(t, text, "info: "); got != want+" "+warning {
 		t.Fatalf("info line = %q\nwant        %q", got, want+" "+warning)
 	}
-	for _, path := range []string{resultLine(t, text, "full: ")} {
-		page, err := os.ReadFile(filepath.Join(f.root, path))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if strings.Contains(string(page), "unchanged for") {
-			t.Fatalf("%s renders the nudge", path)
-		}
+	if strings.Contains(f.servedPage(t), "unchanged for") {
+		t.Fatal("served page renders the response-only nudge")
 	}
 	if text := f.update(t, ``); resultLine(t, text, "info: ") != warning {
 		t.Fatalf("a second update within the hour must retain only the structural warning:\n%s", text)
-	}
-}
-
-func TestWhiteboardTodoAndAgendaWritesRenderFullPageOnly(t *testing.T) {
-	for _, knob := range []string{"off", "on"} {
-		t.Run("knob "+knob, func(t *testing.T) {
-			f := newWhiteboardFixture(t)
-			if resp := f.call(t, "config.tune", map[string]any{"key": "workflow.whiteboard_enabled", "value": knob}); isToolError(resp) {
-				t.Fatalf("config.tune: %s", resp)
-			}
-			f.call(t, "agenda.set", map[string]any{"key": "plan", "value": map[string]any{"step": 1}})
-			if _, err := os.Stat(f.dir()); !errors.Is(err, os.ErrNotExist) {
-				t.Fatalf("writes before the board exists must not render")
-			}
-			f.update(t, ``)
-			embedsBefore := len(f.embeds(t, f.dir()))
-			steps := []struct {
-				tool string
-				args map[string]any
-			}{
-				{"todo.add", map[string]any{"key": "a", "title": "write tests"}},
-				{"todo.check", map[string]any{"key": "a", "status": "done"}},
-				{"agenda.set", map[string]any{"key": "notes", "value": map[string]any{"x": 1}}},
-				{"agenda.clear", map[string]any{"key": "notes"}},
-			}
-			for i, step := range steps {
-				if resp := f.call(t, step.tool, step.args); isToolError(resp) {
-					t.Fatalf("%s failed: %s", step.tool, resp)
-				}
-				want := "wbStamp(\"" + string(rune('2'+i)) + "\");\n"
-				if got := f.stamp(t); got != want {
-					t.Fatalf("after %s stamp = %q, want %q", step.tool, got, want)
-				}
-			}
-			page, _ := os.ReadFile(f.pagePath())
-			if !strings.Contains(string(page), "write tests") {
-				t.Fatalf("the full page must show the current todos")
-			}
-			if got := len(f.embeds(t, f.dir())); got != embedsBefore {
-				t.Fatalf("implicit renders must write no embed: %d -> %d", embedsBefore, got)
-			}
-			// A failed write does not re-render.
-			f.call(t, "todo.check", map[string]any{"key": "missing", "status": "done"})
-			if got := f.stamp(t); got != "wbStamp(\"5\");\n" {
-				t.Fatalf("a failed todo write must not re-render: %q", got)
-			}
-		})
 	}
 }
 
@@ -749,7 +536,7 @@ func TestWhiteboardKnobWriteDefaultsAndCatalog(t *testing.T) {
 	if !entry.HarnessBucketed() || !entry.RequiresLeadAuthority || !entry.RepoScoped() {
 		t.Fatalf("whiteboard entry must be harness-bucketed, lead-only, and repo-scoped: %+v", entry)
 	}
-	if got, want := entry.RepoKey(), "workflow.whiteboard_enabled.<claude|codex|pi|all>"; got != want {
+	if got, want := entry.RepoKey(), "workflow.whiteboard_enabled.<claude|codex|pi|agy|all>"; got != want {
 		t.Fatalf("RepoKey = %q, want %q", got, want)
 	}
 	// agents.tier is harness-applicable but keeps its own structured writer.
@@ -761,12 +548,12 @@ func TestWhiteboardKnobWriteDefaultsAndCatalog(t *testing.T) {
 	catalog := parseTuningCatalogResponse(t, f.call(t, "config.list", map[string]any{"format": "json"}))
 	knob := requireTuningKnob(t, catalog, "workflow.whiteboard_enabled")
 	assertFieldEnum(t, knob.ValueFields, "value", []string{"on", "off"})
-	assertFieldEnum(t, knob.SelectorFields, "harness", []string{"claude", "codex", "pi", "*"})
+	assertFieldEnum(t, knob.SelectorFields, "harness", []string{"claude", "codex", "pi", "agy", "*"})
 	assertFieldEnum(t, knob.SelectorFields, "scope", wsconfig.ScopeSchemaEnum())
 	if got := mustMarshalJSON(t, knob.Current); !strings.Contains(got, `"value":"off"`) || !strings.Contains(got, `"scope":"builtin"`) {
 		t.Fatalf("catalog current value must be the builtin off: %s", got)
 	}
-	if !knob.RepoScope || knob.RepoKey != "workflow.whiteboard_enabled.<claude|codex|pi|all>" {
+	if !knob.RepoScope || knob.RepoKey != "workflow.whiteboard_enabled.<claude|codex|pi|agy|all>" {
 		t.Fatalf("catalog must offer the repo scope under the bucket keys: %+v", knob)
 	}
 
@@ -1047,73 +834,6 @@ func TestWhiteboardKnobRepoScopeReachesFreshBootstrapManual(t *testing.T) {
 	// FRESH without a root has no repository to read the repo scope from.
 	if bare := toolText(t, f.call(t, "workflow_manual", map[string]any{"session_key": freshBootstrapKey})); strings.Contains(bare, "### Whiteboard") {
 		t.Fatalf("a FRESH render without a root must not read the repo scope")
-	}
-}
-
-func TestWhiteboardGarbageCollection(t *testing.T) {
-	f := newWhiteboardFixture(t)
-	manual := func() {
-		t.Helper()
-		if resp := f.call(t, "workflow_manual", map[string]any{}); isToolError(resp) {
-			t.Fatalf("workflow_manual: %s", resp)
-		}
-	}
-	manual()
-	if _, err := os.Stat(f.dir()); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("GC must not create the whiteboard folder")
-	}
-	f.update(t, ``)
-	live := f.embeds(t, f.dir())
-	orphans := []string{"deadorphanid.html", "deadorphanid.stamp.js", "deadorphanid-0123abcd.html"}
-	for _, name := range orphans {
-		mustWrite(t, f.dir(), name, "x")
-	}
-	mustWrite(t, f.dir(), "notes.txt", "kept: not a whiteboard file")
-	// The retired Now file is no board file any more: a leftover from an
-	// older build, live session or dead, is left alone like any other file.
-	mustWrite(t, f.dir(), "deadorphanid.now.md", "kept: not a whiteboard file")
-	mustWrite(t, f.dir(), f.replyID()+".now.md", "kept: not a whiteboard file")
-	manual()
-	for _, name := range orphans {
-		if _, err := os.Stat(filepath.Join(f.dir(), name)); !errors.Is(err, os.ErrNotExist) {
-			t.Fatalf("orphan %s must be deleted", name)
-		}
-	}
-	for _, name := range append(live, filepath.Join(f.replyID(), "index.html"), filepath.Join(f.replyID(), "index.stamp.js"), filepath.Join(f.replyID(), "meta.json"), "deadorphanid.now.md", f.replyID()+".now.md", "notes.txt", whiteboardGCMarker) {
-		if _, err := os.Stat(filepath.Join(f.dir(), name)); err != nil {
-			t.Fatalf("%s must be kept: %v", name, err)
-		}
-	}
-	// At most once per day.
-	mustWrite(t, f.dir(), "laterorphan.html", "x")
-	manual()
-	if _, err := os.Stat(filepath.Join(f.dir(), "laterorphan.html")); err != nil {
-		t.Fatalf("a second scan within a day must not run: %v", err)
-	}
-	old := time.Now().Add(-25 * time.Hour)
-	if err := os.Chtimes(filepath.Join(f.dir(), whiteboardGCMarker), old, old); err != nil {
-		t.Fatal(err)
-	}
-	manual()
-	if _, err := os.Stat(filepath.Join(f.dir(), "laterorphan.html")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("the next day's scan must delete the orphan")
-	}
-
-	// Expiring the key permits derived embed collection, never recursive
-	// deletion of authoritative topic metadata, logs, or panel versions.
-	f.update(t, `<wb:topic name="durable"><wb:panel recap="kept">payload</wb:panel><wb:log>still here</wb:log></wb:topic>`)
-	before := whiteboardTreeForTest(t, f.pageDir())
-	d, _ := f.s.sessions.dirs()
-	if err := os.RemoveAll(d.keyDir(f.key)); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chtimes(filepath.Join(f.dir(), whiteboardGCMarker), old, old); err != nil {
-		t.Fatal(err)
-	}
-	f.s.maybeCollectWhiteboards(f.root)
-	assertWhiteboardTreeForTest(t, f.pageDir(), before)
-	if got := f.embeds(t, f.dir()); len(got) != 0 {
-		t.Fatalf("expired session embeds survived collection: %v", got)
 	}
 }
 

@@ -1,5 +1,5 @@
 ---
-title: "Investigate Japanese agent batch summaries with Korean language configured"
+title: "한국어 설정 상태에서 에이전트 배치 요약이 일본어로 출력되는 현상 조사"
 ---
 
 # Investigate Japanese agent batch summaries with Korean language configured

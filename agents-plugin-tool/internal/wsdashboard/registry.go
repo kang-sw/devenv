@@ -134,6 +134,12 @@ type Registration struct {
 	// persisted on registration/heartbeat/end. Reconnection resumes the idle
 	// budget from this stamp rather than counting a restart as activity.
 	LastCallAt string `json:"last_call_at,omitempty"`
+	// ParentReplyID is the reply-id of the session that spawned this one
+	// (the agent runner's record Parent, copied onto the row it writes), so
+	// a page names its owner from the registration it already reads. Empty
+	// for a session nobody spawned, and from an older runner; the page then
+	// falls back to the rail layout's nesting.
+	ParentReplyID string `json:"parent_reply_id,omitempty"`
 }
 
 // HostMayRun reports whether a hosted row's harness process may still run,
@@ -192,6 +198,29 @@ func LockRegistration(dir, replyID string) (unlock func(), err error) {
 		return nil, fmt.Errorf("acquire the registration lock: %w", err)
 	}
 	return func() { _ = fl.Unlock() }, nil
+}
+
+// TryLockRegistration tries the row lock of session replyID under dir once,
+// without waiting. A false locked result with no error means another writer
+// holds the row; the caller leaves that session for a later attempt.
+func TryLockRegistration(dir, replyID string) (unlock func(), locked bool, err error) {
+	if !ValidReplyID(replyID) {
+		return nil, false, fmt.Errorf("invalid reply-id %q", replyID)
+	}
+	sessionDir := SessionDir(dir, replyID)
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		return nil, false, err
+	}
+	lockPath := filepath.Join(sessionDir, registrationLockName)
+	fl := flock.New(lockPath)
+	locked, err = fl.TryLock()
+	if err != nil {
+		return nil, false, fmt.Errorf("acquire the registration lock: %w", err)
+	}
+	if !locked {
+		return nil, false, nil
+	}
+	return func() { _ = fl.Unlock() }, true, nil
 }
 
 // RegistrationPath is the registration file of session replyID under dir:
@@ -405,10 +434,14 @@ type agentRecordEnd struct {
 	Lead        bool   `json:"lead"`
 	ClosedAt    string `json:"closed_at"`
 	HandedOffAt string `json:"handed_off_at"`
+	HolderID    string `json:"holder_id"`
 	Backend     string `json:"backend"`
+	Model       string `json:"model"`
+	Effort      string `json:"effort"`
 	SessionFile string `json:"session_file"`
 	Parent      *struct {
-		Kind string `json:"kind"`
+		Kind    string `json:"kind"`
+		ReplyID string `json:"reply_id"`
 	} `json:"parent"`
 }
 
@@ -431,7 +464,7 @@ func (r agentRecordEnd) terminalConversation(sessionDir string) bool {
 // handed to a terminal), or a closed spawned child (a closed Pi child only
 // a Send reopens on the session file this directory holds).
 func (r agentRecordEnd) retired() bool {
-	return (r.Lead || r.Parent != nil) && (r.ClosedAt != "" || r.HandedOffAt != "")
+	return (r.Lead || r.Parent != nil) && (r.ClosedAt != "" || (r.HandedOffAt != "" && !HeldAgentWorker(r.Lead, r.HolderID, r.HandedOffAt)))
 }
 
 // piChildDeleted is a presentation-only revival check for an already settled
@@ -463,4 +496,10 @@ func readAgentRecordEnd(sessionDir string) (record agentRecordEnd, hosted bool) 
 		return agentRecordEnd{}, true
 	}
 	return record, true
+}
+
+// HeldAgentWorker distinguishes a live worker's downgrade fence from a lead
+// handed to a terminal. Shared by registry retention and runner projections.
+func HeldAgentWorker(lead bool, holderID, handedOffAt string) bool {
+	return !lead && holderID != "" && handedOffAt != ""
 }

@@ -62,9 +62,12 @@ function launchEnv(inherited, staged, root) {
   // cache and config selection intact; replace only package-bound paths.
   for (const key of ['WS_HOSTED_SESSION', 'WS_HOSTED_SESSION_KEY', 'WS_HOSTED_SESSION_ROW', 'WS_MCP_HARNESS_PID',
     'WS_MCP_PROJECT_ROOT', 'WS_MCP_DASHBOARD_DEV_SOURCE']) delete env[key];
+  const manifests = [path.join(staged.root, 'config-manifest.json')];
+  const agyManifest = path.join(staged.root, 'agy-config-manifest.json');
+  if (fs.existsSync(agyManifest)) manifests.push(agyManifest);
+  manifests.push(path.join(staged.root, 'dashboard-config-manifest.json'));
   return { ...env, WS_CACHE_HOME: root, ...staged.env, WS_MCP_DAEMON_JOB_LIFETIME: '0',
-    WS_MCP_CONFIG_MANIFESTS: [path.join(staged.root, 'config-manifest.json'),
-      path.join(staged.root, 'dashboard-config-manifest.json')].join(';'),
+    WS_MCP_CONFIG_MANIFESTS: manifests.join(';'),
     WS_MCP_RUNTIME_BINARY: staged.binary, WS_MCP_RUNTIME_DIR: staged.root, CLAUDE_PLUGIN_ROOT: staged.root };
 }
 async function connectDaemon({ appRoot, userData, platform = process.platform, packaged = true, replace = false, attachRunning = false }, deps = {}) {

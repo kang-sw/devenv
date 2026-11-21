@@ -38,9 +38,9 @@ user.
    Block ticket: <stem the fix routes to> | none.
    ```
 
-   A host whose subagents cannot call the handler's tools or spawn above
-   their own tier (Pi today) → read the rendered prompt and perform it
-   yourself; its asks go straight to the user.
+   A handler can spawn reviewers only at or below its own tier. If the review
+   requires a higher tier, read the rendered prompt and perform it yourself;
+   its asks go straight to the user.
 
 2. Its report → relay the outcome and `findings` in the user's language.
    `ask-user` → put `ask` to the user and resume it with the answer.

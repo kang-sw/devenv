@@ -41,12 +41,12 @@ func TestMCPTokenIssueReissueAndVoid(t *testing.T) {
 	shortStartWait(t)
 	h := newHarness(t, map[string]string{"chat": chatProfile})
 	r := h.runner
-	if s := r.attachMCP("c1", "", nil, "/w", 0); s != nil {
+	if s := r.attachMCP("c1", "", nil, "/w", 0, BackendAgy); s != nil {
 		t.Fatalf("with no endpoint there is no HTTP session to give: %+v", s)
 	}
 	r.SetEndpoint("http://127.0.0.1:7/")
 	env := map[string]string{EnvAllowedTools: "tickets.query"}
-	s1 := r.attachMCP("c1", "", env, "/w", 0)
+	s1 := r.attachMCP("c1", "", env, "/w", 0, BackendAgy)
 	if s1 == nil || s1.URL != "http://127.0.0.1:7"+wsdashboard.ProxyHTTPPath || len(s1.Token) != 64 {
 		t.Fatalf("a start gets the route and a fresh token: %+v", s1)
 	}
@@ -77,7 +77,7 @@ func TestMCPTokenIssueReissueAndVoid(t *testing.T) {
 		t.Fatal("the waiting resolution never returned")
 	}
 	mcpStartWait = restore
-	if hello.OwnerPID != 4242 || hello.Env["WS_MCP_HARNESS_PID"] != "4242" || hello.Cwd != "/w" || hello.Env[EnvAllowedTools] != "tickets.query" || hello.Env["PATH"] != "/bin" {
+	if hello.OwnerPID != 4242 || hello.Harness != BackendAgy || hello.Env["WS_MCP_HARNESS_PID"] != "4242" || hello.Cwd != "/w" || hello.Env[EnvAllowedTools] != "tickets.query" || hello.Env["PATH"] != "/bin" {
 		t.Fatalf("the hello is the started process's: %+v", hello)
 	}
 	if _, has := hello.Env[EnvMCPSessionToken]; has {
@@ -90,7 +90,7 @@ func TestMCPTokenIssueReissueAndVoid(t *testing.T) {
 	}
 
 	// The next start voids the last one's token.
-	s2 := r.attachMCP("c1", "", env, "/w", 0)
+	s2 := r.attachMCP("c1", "", env, "/w", 0, BackendAgy)
 	if s2 == nil || s2.Token == s1.Token {
 		t.Fatalf("each start draws its own token: %+v", s2)
 	}
@@ -112,7 +112,7 @@ func TestMCPTokenIssueReissueAndVoid(t *testing.T) {
 
 	// Another conversation's token is its own; the process's end voids only
 	// its conversation's.
-	s3 := r.attachMCP("c2", "", env, "/w2", 0)
+	s3 := r.attachMCP("c2", "", env, "/w2", 0, BackendAgy)
 	s3.Started(nil, 0)
 	r.revokeToken("c1")
 	if !isClosed(void2) {
@@ -125,12 +125,12 @@ func TestMCPTokenIssueReissueAndVoid(t *testing.T) {
 	// A rejoin restores the recorded token, even before an endpoint is set;
 	// the recorded PID stands in for one the backend cannot report.
 	r.SetEndpoint("")
-	s4 := r.attachMCP("c3", "recorded-token", env, "/w3", 99)
+	s4 := r.attachMCP("c3", "recorded-token", env, "/w3", 99, BackendAgy)
 	if s4 == nil || s4.Token != "recorded-token" {
 		t.Fatalf("a rejoin keeps its process's token: %+v", s4)
 	}
 	s4.Started([]string{"PATH=/bin"}, 0)
-	if hello, _, ok := r.ResolveMCPToken("recorded-token"); !ok || hello.OwnerPID != 99 || hello.Env["WS_MCP_HARNESS_PID"] != "99" {
+	if hello, _, ok := r.ResolveMCPToken("recorded-token"); !ok || hello.OwnerPID != 99 || hello.Harness != BackendAgy || hello.Env["WS_MCP_HARNESS_PID"] != "99" {
 		t.Fatalf("the restored token resolves with the recorded PID: %+v %v", hello, ok)
 	}
 	for _, token := range []string{"", "unknown"} {
@@ -145,7 +145,7 @@ func TestMCPTokenIssueReissueAndVoid(t *testing.T) {
 func TestMCPTokenVoidEndsAWaitingResolution(t *testing.T) {
 	h := newHarness(t, map[string]string{"chat": chatProfile})
 	h.runner.SetEndpoint("http://127.0.0.1:7")
-	s := h.runner.attachMCP("c1", "", nil, "/w", 0)
+	s := h.runner.attachMCP("c1", "", nil, "/w", 0, BackendAgy)
 	done := make(chan bool, 1)
 	go func() {
 		_, _, ok := h.runner.ResolveMCPToken(s.Token)
@@ -674,4 +674,65 @@ func TestClaudeLeadStaleRouteFailedRestart(t *testing.T) {
 	if rec := h.record(id); rec.MCPURL != after+wsdashboard.ProxyHTTPPath || rec.MCPToken == "" {
 		t.Fatalf("the new process is on the new route: %+v", rec)
 	}
+}
+
+// TestClaudeLeadRejoinBrokenMCPCurrentRouteWaitsForIdlePoint: a rejoined
+// process whose ws-mcp route is still current (mcpStale == false) does not
+// restart at replayDone for an existing broken MCP server; it takes held input
+// on the rejoined process and restarts at the usual post-turn idle point.
+func TestClaudeLeadRejoinBrokenMCPCurrentRouteWaitsForIdlePoint(t *testing.T) {
+	shortStartWait(t)
+	bundle := leadBundledFixture(t, "wsflow")
+	h := newLeadHarness(t)
+	var calls atomic.Int32
+	h.opts.WSMCP = leadLauncher(bundle, &calls)
+	const endpoint = "http://127.0.0.1:1"
+	h.startAt(endpoint)
+	id, holder := h.runLead("one")
+	h.holders.out(holder, mcpTurn("u1", MCPConnected)...)
+	h.idle(id)
+
+	h.runner.Close()
+	h.holders.restart()
+	entered, release := h.gateScan()
+	defer release()
+	h.startAt(endpoint)
+	wait(t, "the gated rejoin scan", entered)
+
+	// Mark an MCP server broken on the rejoining conv before replayDone runs
+	// while the ws-mcp route is still current, and hold a user message. Use a
+	// server name not reported connected by turn 1's replay so mcpBroken stays
+	// set when replayDone runs.
+	const brokenServer = "broken-mcp"
+	c := h.runner.conv(id)
+	var stale bool
+	c.do(func() {
+		stale = c.mcpStale
+		c.setStatus(func() { c.mcpBroken = []string{brokenServer} })
+	})
+	if stale {
+		t.Fatal("same-endpoint rejoin must not mark the ws-mcp route stale")
+	}
+	h.send(id, "two")
+	release()
+
+	// Because the route is current, replayDone must not restart ahead of input:
+	// the held message goes to the rejoined holder first.
+	eventually(t, "rejoined holder takes held input", func() bool {
+		return slices.Equal(h.userInputs(holder), h.envelopes("one", "two"))
+	})
+	if h.holders.opCount("stop") != 0 || h.holders.opCount("launch") != 1 || h.holder(id) != holder {
+		t.Fatalf("broken MCP on current route restarted at rejoin instead of waiting for idle: %v", h.holders.opList())
+	}
+
+	// Once that turn ends at its usual idle point, the broken MCP server
+	// triggers the deferred restart.
+	h.holders.out(holder, stateLine(HarnessRunning), replyLine("u2", "ok"), resultLine(), stateLine(HarnessIdle))
+	eventually(t, "deferred restart at post-turn idle point", func() bool {
+		return h.holders.opCount("stop "+holder) == 1 && h.holders.opCount("launch") == 2
+	})
+	eventually(t, "replacement process running", func() bool {
+		st := h.state(id)
+		return st.Process && h.holder(id) != holder
+	})
 }

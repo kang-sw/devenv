@@ -15,12 +15,13 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/kang-sw/devenv/internal/wsharnessenv"
 	"github.com/kang-sw/devenv/internal/wslive"
 )
 
 // agy.go is the Antigravity backend: `agy acp`, the Agent Client Protocol
 // (v1: JSON-RPC 2.0 over stdio, one message per line). Hosted leads run
-// under a holder; workers are daemon-owned processes using the default
+// under a holder, as do workers using the default
 // agent with their instructions appended to its system prompt.
 //
 // The wire facts it relies on are pinned by agy_fixture_test.go against
@@ -79,8 +80,8 @@ var (
 	agyWakeIdleQuiet  = 30 * time.Second
 )
 
-// agyDropEnv are the variable prefixes an agy lead starts without: the
-// parent harness sessions' (leadDropEnv names ws's own).
+// agyDropEnv are the parent harness variable prefixes an agy session starts
+// without. wsharnessenv.Drop removes ws's own session identity.
 var agyDropEnv = []string{"CLAUDE", "CODEX_", "PI_", "ORCA_"}
 
 // agyLeadBgShellRule is appended to a hosted agy lead's system prompt so it
@@ -93,12 +94,24 @@ const agyLeadBgShellRule = `Never end your turn while a non-daemon ` + "`run_com
 // longer matches is kept.
 const agyRingSkip = `^\{"jsonrpc":"2\.0","method":"session/update","params":\{"sessionId":"[^"]*","update":\{"sessionUpdate":"agent_thought_chunk"`
 
+// agyRingPulse replaces dropped thought lines at a bounded rate. It is a
+// content-free session update, so old and new mappers both turn it into the
+// existing in-memory ModelActivity signal without exposing thought text.
+const agyRingPulse = `{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"ws_activity"}}}`
+
 // Executable is the agy command availability is checked against.
 func (b AgyBackend) Executable() string {
 	if b.Command != "" {
 		return b.Command
 	}
 	return "agy"
+}
+
+// ResolveCommand resolves the agy executable and any leading arguments the same
+// way hosted launches do (honouring Command overrides and unwrapping Windows
+// cmd-shims) without spawning a process.
+func (b AgyBackend) ResolveCommand() (string, []string, error) {
+	return harnessCommand(b.Command, "agy")
 }
 
 // agyChoices holds the last session's model and thought-level report,
@@ -115,9 +128,9 @@ func (b AgyBackend) Choices(ctx context.Context) ([]ModelChoice, []string, error
 }
 
 // agyEnv is a lead's environment: the daemon's without the parent harness
-// sessions' variables and ws's own launcher state (leadDropEnv, which also
-// drops the HTTP MCP credentials: agy takes them in its session request),
-// plus the hosted-session variables.
+// sessions' variables and ws's own launcher state (including the HTTP MCP
+// credentials: agy takes them in its session request), plus the hosted-session
+// variables.
 func agyEnv(spec StartSpec) []string {
 	set := map[string]string{}
 	if spec.Lead != nil {
@@ -125,7 +138,7 @@ func agyEnv(spec StartSpec) []string {
 			set[name] = value
 		}
 	}
-	return harnessEnv(spec.Env, append(slices.Clone(agyDropEnv), leadDropEnv...), nil, set)
+	return harnessEnv(wsharnessenv.Drop(spec.Env), agyDropEnv, nil, set)
 }
 
 // Start launches `agy acp` for spec and, unless it rejoins a held process,
@@ -135,9 +148,6 @@ func agyEnv(spec StartSpec) []string {
 func (b AgyBackend) Start(ctx context.Context, spec StartSpec) (Process, error) {
 	if spec.Lead != nil && spec.Holder == nil {
 		return nil, errors.New("agy backend: a hosted lead requires a session holder")
-	}
-	if spec.Lead == nil && spec.Holder != nil {
-		return nil, errors.New("agy backend: workers are not holder-held")
 	}
 	attach := spec.Holder != nil && spec.Holder.id != ""
 	if !attach && spec.MCPSession == nil {
@@ -154,8 +164,10 @@ func (b AgyBackend) Start(ctx context.Context, spec StartSpec) (Process, error) 
 	cmd.Env = agyEnv(spec)
 	if spec.Holder != nil {
 		spec.Holder.ringSkip = agyRingSkip
+		spec.Holder.ringPulse = agyRingPulse
 	}
 	m := newAgyMapper(spec.SessionID)
+	m.recoveredSteers = slices.Clone(spec.RecoveredSteers)
 	sp, err := startChild(spec, cmd, m, agyProtocol{})
 	if err != nil {
 		return nil, err
@@ -230,7 +242,11 @@ type agyProcess struct {
 }
 
 func (p *agyProcess) processControls() processControls {
-	return processControls{Process: p, approval: p, mode: p, steer: p}
+	controls := processControls{Process: p, approval: p, mode: p, steer: p}
+	if p.worker {
+		controls.reports = p
+	}
+	return controls
 }
 
 func (p *agyProcess) Close() error {
@@ -359,7 +375,7 @@ func (p *agyProcess) Send(text string) error {
 		return errors.New("the agy session is not open")
 	}
 	id := p.newID(agyKindPrompt)
-	p.m.promptSent(id)
+	p.m.promptSentText(id, text)
 	err := p.writeLine(map[string]any{"jsonrpc": "2.0", "id": id, "method": "session/prompt", "params": map[string]any{
 		"sessionId": sid,
 		"prompt":    []any{map[string]any{"type": "text", "text": text}},
@@ -373,6 +389,11 @@ func (p *agyProcess) Send(text string) error {
 // Steer writes text as another prompt: agy ends the running prompt and
 // carries its run on under this one (seen on 1.5.9).
 func (p *agyProcess) Steer(text string) error { return p.Send(text) }
+
+// ClearSteered is a no-op for agy. Its acknowledgement is the prior prompt's
+// end_turn response, which also proves the replacement prompt took the run;
+// the runner receives SteerAnswer and UserTaken together.
+func (p *agyProcess) ClearSteered() error { return nil }
 
 // Interrupt cancels the running turn; its prompt answers "cancelled".
 func (p *agyProcess) Interrupt() error {
@@ -582,13 +603,18 @@ type agyMapper struct {
 	// and is bounded by wakeTimer so a burst with no prompt response
 	// closes cleanly instead of wedging c.turn.
 	outstanding     map[string]bool
+	steerText       map[string]string
+	steerOrder      []string
+	recoveredSteers []string
 	inTurn          bool
 	unsolicitedTurn bool
 	wakeStepHadText bool
 	wakeSawUsage    bool
 	openCalls       map[string]bool
+	pendingTools    map[string]bool
 	openBg          map[string]bool
 	bgCalls         map[string]bool
+	modelFailure    string
 	wakeTimer       *time.Timer
 	onWakeClose     func()
 	turnSeq         int
@@ -602,18 +628,27 @@ type agyMapper struct {
 	// approvalOf their ids by tool call.
 	approvals  map[string]*agyApproval
 	approvalOf map[string]string
+
+	// lastContext retains the latest usage_update context so KindStatus rate
+	// events preserve it instead of clearing Usage.Context.
+	lastContext *wslive.UsageContext
+	rate        agyOutputRateTracker
+	// now is an optional local clock seam (epoch ms) for deterministic tests.
+	now func() int64
 }
 
 func newAgyMapper(sessionID string) *agyMapper {
 	return &agyMapper{
-		sessionID:   sessionID,
-		outstanding: map[string]bool{},
-		openCalls:   map[string]bool{},
-		openBg:      map[string]bool{},
-		bgCalls:     map[string]bool{},
-		batches:     newBatchTracker("agy"),
-		approvals:   map[string]*agyApproval{},
-		approvalOf:  map[string]string{},
+		sessionID:    sessionID,
+		outstanding:  map[string]bool{},
+		steerText:    map[string]string{},
+		openCalls:    map[string]bool{},
+		pendingTools: map[string]bool{},
+		openBg:       map[string]bool{},
+		bgCalls:      map[string]bool{},
+		batches:      newBatchTracker("agy"),
+		approvals:    map[string]*agyApproval{},
+		approvalOf:   map[string]string{},
 	}
 }
 
@@ -688,6 +723,7 @@ func (m *agyMapper) closeUnsolicited(now int64) []Event {
 		return nil
 	}
 	m.wakeTimer = nil
+	m.rate.dropUntracked()
 	return m.endTurn(agyMessage{}, now)
 }
 
@@ -746,18 +782,34 @@ func (m *agyMapper) mode() string {
 	return m.curMode
 }
 
-func (m *agyMapper) promptSent(id string) {
+func (m *agyMapper) promptSent(id string) { m.promptSentText(id, "") }
+
+func (m *agyMapper) promptSentText(id, text string) {
 	m.mu.Lock()
+	if m.unsolicitedTurn {
+		m.rate.dropUntracked()
+	}
 	m.unsolicitedTurn = false
 	m.wakeSawUsage = false
 	m.stopWakeTimerLocked()
+	// A second prompt while one is outstanding is a steer even when agy has
+	// not emitted the first session update yet. The runner can submit mail as
+	// soon as its turn starts, before that provider update arrives.
+	if len(m.outstanding) > 0 {
+		m.steerText[id] = text
+		m.steerOrder = append(m.steerOrder, id)
+	}
 	m.outstanding[id] = true
+	m.rate.promptSent(id)
 	m.mu.Unlock()
 }
 
 func (m *agyMapper) promptDropped(id string) {
 	m.mu.Lock()
 	delete(m.outstanding, id)
+	delete(m.steerText, id)
+	m.steerOrder = slices.DeleteFunc(m.steerOrder, func(steerID string) bool { return steerID == id })
+	m.rate.promptDropped(id)
 	m.mu.Unlock()
 }
 
@@ -800,6 +852,9 @@ func (m *agyMapper) mapLine(line []byte, replies lineReplies) []Event {
 		return nil
 	}
 	now := time.Now().UnixMilli()
+	if m.now != nil {
+		now = m.now()
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	hasID := len(msg.ID) > 0 && string(msg.ID) != "null"
@@ -807,7 +862,20 @@ func (m *agyMapper) mapLine(line []byte, replies lineReplies) []Event {
 	case msg.Method != "" && hasID:
 		return m.request(msg, replies, now)
 	case msg.Method == "session/update":
-		return m.update(msg.Params, replies, now)
+		oldFailure := m.modelFailure
+		out := m.update(msg.Params, replies, now)
+		if _, replaying := replies.(silentReplies); !replaying {
+			n := len(m.pendingTools)
+			out = append(out, Event{ModelActivity: &n})
+			if oldFailure != m.modelFailure {
+				if oldFailure != "" && m.modelFailure == "" {
+					out = append(out, Event{Notice: "agy recovered after in-band model failure: " + oldFailure})
+				}
+				failure := m.modelFailure
+				out = append(out, Event{ModelFailureUpdate: &failure})
+			}
+		}
+		return out
 	case msg.Method == "" && hasID:
 		return m.response(msg, replies, now)
 	}
@@ -838,6 +906,7 @@ func (m *agyMapper) request(msg agyMessage, replies lineReplies, now int64) []Ev
 		id = "rpc:" + string(raw)
 	}
 	_, replaying := replies.(silentReplies)
+	m.rate.breakRun(replaying)
 	out := m.startTurn(nil, replaying)
 	m.wakeSawUsage = false
 	m.stopWakeTimerLocked()
@@ -877,12 +946,54 @@ func (m *agyMapper) response(msg agyMessage, replies lineReplies, now int64) []E
 		return nil
 	}
 	if kind == agyKindPrompt {
+		_, replaying := replies.(silentReplies)
 		ours := m.outstanding[id]
 		delete(m.outstanding, id)
-		if len(m.outstanding) > 0 || (!ours && !m.inTurn) {
-			return nil
+		var steerEvents []Event
+		for i, steerID := range m.steerOrder {
+			if m.outstanding[steerID] {
+				text := m.steerText[steerID]
+				delete(m.steerText, steerID)
+				m.steerOrder = slices.Delete(m.steerOrder, i, i+1)
+				steerEvents = append(steerEvents, Event{SteerAnswer: &SteerAnswer{}}, Event{UserTaken: text})
+				break
+			}
 		}
-		return m.endTurn(msg, now)
+		if len(steerEvents) == 0 && len(m.recoveredSteers) > 0 {
+			text := m.recoveredSteers[0]
+			m.recoveredSteers = m.recoveredSteers[1:]
+			steerEvents = append(steerEvents, Event{SteerAnswer: &SteerAnswer{}}, Event{UserTaken: text})
+		}
+		var rateEv *Event
+		if rate, ok := m.rate.complete(id, msg, replaying); ok {
+			rateCopy := rate
+			rateEv = &Event{Live: &wslive.Event{
+				Kind:       wslive.KindStatus,
+				Context:    cloneUsageContext(m.lastContext),
+				OutputTps:  &rateCopy,
+				OutputRate: &wslive.OutputRate{OutputTps: rateCopy, At: now},
+			}}
+		}
+		if len(m.outstanding) > 0 || (!ours && !m.inTurn) {
+			if rateEv != nil {
+				return append(steerEvents, *rateEv)
+			}
+			return steerEvents
+		}
+		out := m.endTurn(msg, now)
+		if rateEv != nil {
+			// Emit KindStatus before TurnEnd so the runner updates telemetry
+			// while the turn is active. Mark this exact pair so file-only
+			// recovery persists both in TurnEnd's single snapshot.
+			if n := len(out); n > 0 && out[n-1].TurnEnd {
+				turnEnd := out[n-1]
+				rateEv.LiveCoalescesTurnEnd = true
+				out = append(out[:n-1], *rateEv, turnEnd)
+			} else {
+				out = append(out, *rateEv)
+			}
+		}
+		return append(steerEvents, out...)
 	}
 	a := controlAnswer{ok: msg.Error == nil, body: msg.Result}
 	if msg.Error != nil {
@@ -1014,6 +1125,9 @@ func (m *agyMapper) configOptions(body json.RawMessage) {
 	seen := map[string]bool{}
 	for _, o := range r.ConfigOptions {
 		if o.ID == "model" {
+			if o.CurrentValue != "" && o.CurrentValue != m.model {
+				m.rate.clearWindow()
+			}
 			m.model = o.CurrentValue
 		}
 		for _, v := range o.Options {
@@ -1052,6 +1166,7 @@ func (m *agyMapper) startTurn(out []Event, replaying bool) []Event {
 		return out
 	}
 	m.inTurn = true
+	m.modelFailure = ""
 	m.wakeStepHadText = false
 	m.wakeSawUsage = false
 	if len(m.outstanding) == 0 && !replaying {
@@ -1071,6 +1186,26 @@ func (m *agyMapper) flushReply(out []Event) []Event {
 		return out
 	}
 	return append(out, Event{Live: &wslive.Event{Kind: wslive.KindReply, Text: text, Final: true}})
+}
+
+// stripReplyFailure removes a terminal failure line once later model activity
+// proves agy recovered. The live partial remains a diagnostic, but the final
+// reply and parent report contain only the successful attempt.
+func (m *agyMapper) stripReplyFailure(failure string) {
+	if failure == "" {
+		return
+	}
+	text := m.reply.String()
+	trimmed := strings.TrimRight(text, " \t\r\n")
+	if !strings.HasSuffix(trimmed, failure) {
+		return
+	}
+	prefix := strings.TrimSuffix(trimmed, failure)
+	prefix = strings.TrimSuffix(prefix, "\n")
+	prefix = strings.TrimSuffix(prefix, "\r")
+	m.reply.Reset()
+	m.reply.WriteString(prefix)
+	m.replyAt = 0
 }
 
 func (m *agyMapper) groupID() string {
@@ -1105,11 +1240,15 @@ func (m *agyMapper) endTurn(msg agyMessage, now int64) []Event {
 	}
 	clear(m.openBg)
 	clear(m.openCalls)
+	clear(m.pendingTools)
+	modelFailure := m.modelFailure
+	m.modelFailure = ""
 	m.inTurn = false
 	m.unsolicitedTurn = false
 	m.wakeStepHadText = false
 	m.wakeSawUsage = false
 	m.stopWakeTimerLocked()
+	m.rate.dropUntracked()
 	ev := Event{TurnEnd: true}
 	switch {
 	case msg.Error != nil:
@@ -1118,15 +1257,24 @@ func (m *agyMapper) endTurn(msg agyMessage, now int64) []Event {
 		ev.TurnReason = wslive.TurnAborted
 	case r.StopReason != "" && r.StopReason != "end_turn":
 		ev.TurnError = "agy stopped the turn: " + r.StopReason
+	case modelFailure != "":
+		ev.ModelFailure = modelFailure
 	}
 	return append(out, ev)
 }
 
-// agyMCPToolName is a tool's name under agy's MCP naming, which keeps
-// the tool's own name whole: the tool "tracker.update" of server "ws" is
-// mcp_ws_tracker.update (seen on 1.5.10).
+// agyMCPToolName is a tool's current name under agy's MCP naming: the
+// sanitized tool name prefixed by its server, so ws tracker.update is
+// mcp_ws_tracker_update.
 func agyMCPToolName(server, tool string) string {
-	return "mcp_" + server + "_" + tool
+	sanitized, _ := ApplyToolNameScheme(ToolNameSchemeSanitize, tool)
+	return "mcp_" + server + "_" + sanitized
+}
+
+// agyMCPToolNameMatches also accepts the dotted spelling reported by agy
+// connections created before ws began advertising sanitized aliases.
+func agyMCPToolNameMatches(name, server, tool string) bool {
+	return name == agyMCPToolName(server, tool) || name == "mcp_"+server+"_"+tool
 }
 
 type agyUpdate struct {
@@ -1155,6 +1303,9 @@ func (m *agyMapper) update(params json.RawMessage, replies lineReplies, now int6
 	}
 	u := p.Update
 	_, replaying := replies.(silentReplies)
+	if u.SessionUpdate != "agent_message_chunk" {
+		m.rate.breakRun(replaying)
+	}
 	switch u.SessionUpdate {
 	case "agent_message_chunk":
 		out := m.startTurn(nil, replaying)
@@ -1166,6 +1317,7 @@ func (m *agyMapper) update(params json.RawMessage, replies lineReplies, now int6
 			m.armWakeIfReadyLocked(replaying)
 			return out
 		}
+		m.rate.messageChunk(now, replaying)
 		m.wakeStepHadText = true
 		m.wakeSawUsage = false
 		m.armWakeIfReadyLocked(replaying)
@@ -1174,7 +1326,16 @@ func (m *agyMapper) update(params json.RawMessage, replies lineReplies, now int6
 			m.group++
 			m.groupCalls = false
 		}
+		before := m.reply.String()
+		oldFailure := m.modelFailure
 		m.reply.WriteString(c.Text)
+		m.modelFailure = agyReplyTailFailure(m.reply.String())
+		if oldFailure != "" && m.modelFailure == "" {
+			m.reply.Reset()
+			m.reply.WriteString(before)
+			m.stripReplyFailure(oldFailure)
+			m.reply.WriteString(c.Text)
+		}
 		if m.replyAt != 0 && now-m.replyAt < claudePartialEvery {
 			return out
 		}
@@ -1185,11 +1346,16 @@ func (m *agyMapper) update(params json.RawMessage, replies lineReplies, now int6
 		return append(out, Event{Live: &wslive.Event{Kind: wslive.KindReply, Text: m.reply.String()}})
 	case "agent_thought_chunk":
 		out := m.startTurn(nil, replaying)
+		m.stripReplyFailure(m.modelFailure)
+		m.modelFailure = ""
 		m.wakeSawUsage = false
 		m.armWakeIfReadyLocked(replaying)
 		return out
 	case "tool_call":
-		out := m.flushReply(m.startTurn(nil, replaying))
+		out := m.startTurn(nil, replaying)
+		m.stripReplyFailure(m.modelFailure)
+		out = m.flushReply(out)
+		m.modelFailure = ""
 		m.wakeStepHadText = false
 		m.wakeSawUsage = false
 		m.stopWakeTimerLocked()
@@ -1198,6 +1364,7 @@ func (m *agyMapper) update(params json.RawMessage, replies lineReplies, now int6
 			name = u.Title
 		}
 		if u.ToolCallID != "" && u.Status != "completed" && u.Status != "failed" {
+			m.pendingTools[u.ToolCallID] = true
 			isDaemon := false
 			if name == "run_command" {
 				var args struct {
@@ -1232,6 +1399,7 @@ func (m *agyMapper) update(params json.RawMessage, replies lineReplies, now int6
 			pct := float64(used) * 100 / float64(u.Size)
 			ctx.Percent = &pct
 		}
+		m.lastContext = cloneUsageContext(ctx)
 		return []Event{{Live: &wslive.Event{Kind: wslive.KindStatus, Context: ctx}}}
 	case "available_commands_update":
 		return m.commands(u.AvailableCommands)
@@ -1267,6 +1435,7 @@ func (m *agyMapper) toolStatus(u agyUpdate, replaying bool, now int64) []Event {
 		return nil
 	}
 	failed := u.Status == "failed"
+	delete(m.pendingTools, u.ToolCallID)
 	delete(m.openCalls, u.ToolCallID)
 	delete(m.openBg, u.ToolCallID)
 	out := m.batches.endCall(u.ToolCallID, failed, now)
@@ -1280,7 +1449,7 @@ func (m *agyMapper) toolStatus(u agyUpdate, replaying bool, now int64) []Event {
 		n := len(m.bgCalls)
 		out = append(out, Event{BackgroundTasks: &n})
 	}
-	if !failed && u.Name == agyMCPToolName(ReservedMCPServer, TrackerWriteTool) {
+	if !failed && agyMCPToolNameMatches(u.Name, ReservedMCPServer, TrackerWriteTool) {
 		out = append(out, resultEvents(TrackerWriteTool, "")...)
 	}
 	m.armWakeIfReadyLocked(replaying)

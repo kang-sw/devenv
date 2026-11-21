@@ -194,6 +194,7 @@ context.allNums = () => ({}); // Ordinary sends here have no image markers; imag
 context.sendText = () => f.value; context.followConvo = () => {}; context.noteWarn = s => context.warns.push(s); context.clearDraft = () => {}; context.grow = () => {}; context.clearMentions = () => {};
 context.post = (route, body, done) => { context.posted.push(plain(body)); done(true, {}); };
 context.chipList = () => []; context.topicNotes = () => []; context.boardOwn = {}; context.boardFlushViewed = () => {}; context.clearTrash = () => {}; context.closeTopicNotes = () => {}; context.renderChips = () => {}; context.renderImgs = () => {};
+context.inlineEditor = () => null;
 // A message send goes through the outbox section; this fixture has no conversation.
 Object.assign(context, { doc: { createElement: n => new El(n), querySelector: () => null }, q: () => [], dropImg: () => {}, release: () => {}, imgTrash: {}, imgSeq: 0, queueDraft: () => {}, saveDraft: () => {}, restoreHeld: () => {}, marker: n => '[Image #' + n + ']' });
 const dashSrc = readAssetSource('wsdashboard', 'dashboard.js'), outbox = dashSrc.match(/\n  \/\/ --- outbox:[^]*?\n  function outboxSync\([^]*?\n  \}\n/);

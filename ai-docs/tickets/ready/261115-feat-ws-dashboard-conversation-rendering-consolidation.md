@@ -1,5 +1,5 @@
 ---
-title: Consolidate conversation mail delivery and report presentation
+title: "대화 메일 전달 및 보고 표시 통합"
 related:
   261114-refactor-ws-dashboard-whiteboard-asset-split: prerequisite; consume its landed move map before Phase 1 starts
   261115-feat-ws-whiteboard-committed-effects-in-conversation: accepted committed-effects substrate; preserve its producer contract and no-panel-HTML boundary

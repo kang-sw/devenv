@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { chromium } = require(process.env.WS_PLAYWRIGHT_MODULE);
-const [base, standalone, shots] = process.argv.slice(2);
+const [base, shots] = process.argv.slice(2);
 
 (async () => {
   const browser = await chromium.launch({ headless: true });
@@ -45,46 +45,6 @@ const [base, standalone, shots] = process.argv.slice(2);
       fs.mkdirSync(shots, { recursive: true });
       await tab.screenshot({ path: path.join(shots, name + '.png') });
     }
-
-    // Standalone board: topic body, per-entry log, policy body and side panel.
-    await tab.goto(standalone);
-    await clickSelect(tab, '.doc-body');
-    await shot('card-select-all-light-1280');
-    await key('Control');
-    await assertScope(tab, '.doc-body');
-    await key('Meta');
-    await assertScope(tab, '.doc-body');
-    await tab.locator('.entry-text').hover();
-    await key('Control');
-    await assertScope(tab, '.doc-body'); // selection wins over pointer
-    await clear(tab);
-    await key('Control');
-    await assertScope(tab, '.doc-body'); // last click wins over pointer
-    await clickSelect(tab, '.entry-text');
-    await clickSelect(tab, '.cbody', 'Control', false);
-    await clickSelect(tab, '.panel > .body');
-
-    // A caret in a different block wins over the last clicked block.
-    await tab.evaluate(() => {
-      const el = document.querySelector('.doc-body p');
-      getSelection().collapse(el.firstChild, 2);
-    });
-    await key('Control');
-    await assertScope(tab, '.doc-body');
-    // Clicking chrome clears the remembered block; hovering alone is enough.
-    await tab.locator('.top h1').click();
-    await clear(tab);
-    await tab.locator('.doc-body').hover();
-    await key('Control');
-    await assertScope(tab, '.doc-body');
-    await tab.locator('.top h1').click();
-    await key('Control');
-    assert.equal(await selected(tab), '');
-    await key('Meta');
-    assert.equal(await selected(tab), '');
-    assert.equal(await tab.locator('.top h1').evaluate(el => getComputedStyle(el).userSelect), 'none');
-    assert.notEqual(await tab.locator('.cbar .id').evaluate(el => getComputedStyle(el).userSelect), 'none', 'copyable item IDs stay selectable');
-    await uncanceled(tab, '#reply-text');
 
     // The dashboard is a real rail shell plus the normal session frame.
     await tab.goto(base + '/s/livesession');
@@ -193,6 +153,6 @@ const [base, standalone, shots] = process.argv.slice(2);
     await frame.locator('#empty-modal').evaluate(el => el.remove());
     await frame.locator('#select-all-fixtures').evaluate(el => el.remove());
     assert.deepEqual(errors, []);
-    console.log('scoped select-all: standalone body/log/policy/panel; dashboard bubble/composer/preview/shell; repeat and priority; dialogs; stale targets; terminal and sandbox exclusions: PASS');
+    console.log('scoped select-all: dashboard bubble/composer/preview/shell; repeat and priority; dialogs; stale targets; terminal and sandbox exclusions: PASS');
   } finally { await browser.close(); }
 })().catch(e => { console.error(e); process.exitCode = 1; });

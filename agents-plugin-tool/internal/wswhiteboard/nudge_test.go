@@ -234,10 +234,11 @@ func TestStaleNudgeNeverRenders(t *testing.T) {
 		t.Fatalf("stale update must nudge")
 	}
 	for _, layout := range []Layout{LayoutFull} {
-		html, err := RenderPage(BuildView(st, ViewInput{Layout: layout}))
+		regions, err := RenderRegions(BuildView(st, ViewInput{Layout: layout}))
 		if err != nil {
 			t.Fatal(err)
 		}
+		html := string(regions.Board)
 		if strings.Contains(html, "unchanged for") || strings.Contains(html, "close them with") {
 			t.Fatalf("layout %v renders the nudge", layout)
 		}

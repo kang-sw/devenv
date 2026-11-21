@@ -297,8 +297,141 @@ func TestConfigListReportsRejectedManifest(t *testing.T) {
 	if len(view.ManifestErrors) != 1 || !strings.Contains(view.ManifestErrors[0], bad) {
 		t.Fatalf("manifest_errors = %v", view.ManifestErrors)
 	}
+	for _, knob := range view.Knobs {
+		if knob.ID == "acme.x" {
+			t.Fatalf("rejected manifest's key must not enter the tune catalog: %+v", knob)
+		}
+	}
+	unknown := keyedCall(t, server, 930403, key, "config.tune", map[string]any{"key": "acme.x", "value": "new"})
+	if !toolIsError(t, unknown) || !strings.Contains(toolText(t, unknown), "call config.list for supported keys") {
+		t.Fatalf("rejected key's error must direct the caller to the manifest diagnostics: %s", unknown)
+	}
 	if got := configGetJSON(t, server, 930402, map[string]any{"key": "acme.limit"}); got.Value != float64(3) {
 		t.Fatalf("accepted manifest must still resolve: %+v", got)
+	}
+}
+
+func TestClaudeCatalogWithoutAgyManifestGatesNewKey(t *testing.T) {
+	server, _, key := manifestServer(t, claudeManifestPath, filepath.Join("..", "..", "..", "agents-plugin", "dashboard-config-manifest.json"))
+	server.observeHarness("hello", "claude")
+	catalog := parseTuningCatalogResponse(t, keyedCall(t, server, 930405, key, "config.list", map[string]any{"format": "json"}))
+	if knob := findTuningKnob(catalog, "agy.model_wait_timeout_seconds"); knob != nil {
+		t.Fatalf("old two-manifest catalog unexpectedly advertises the agy writer: %+v", knob)
+	}
+}
+
+// A Claude hello uses its own three-manifest policy, so the agy key must be
+// discoverable before a project write and readable through the same session.
+func TestClaudeHelloAgyModelWaitProjectTune(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	mustWrite(t, root, "README.md", "# Test\n")
+	initGit(t, root)
+	paths := []string{
+		claudeManifestPath,
+		agyManifestPath,
+		filepath.Join("..", "..", "..", "agents-plugin", "dashboard-config-manifest.json"),
+	}
+	server := NewServerWithOptions(ServerOptions{
+		Root: root, Version: "test", Harness: "claude",
+		Env: EnvFromMap(map[string]string{
+			envConfigManifests: strings.Join(paths, ";"),
+			"PATH":             os.Getenv("PATH"),
+			"WS_CACHE_HOME":    filepath.Join(t.TempDir(), "cache"),
+			"WS_CONFIG_HOME":   filepath.Join(t.TempDir(), "config"),
+			"WS_RSRC_ROOT":     filepath.Join("..", "..", "..", "agents-plugin", "rsrc"),
+		}),
+	})
+	t.Cleanup(server.Close)
+	key, _ := parseLoginResponse(t, callLogin(t, server, 930410, root, nil))
+	const setting = "agy.model_wait_timeout_seconds"
+	catalog := parseTuningCatalogResponse(t, keyedCall(t, server, 930411, key, "config.list", map[string]any{"format": "json"}))
+	knob := requireTuningKnob(t, catalog, setting)
+	if knob.Writer.Tool != "config.tune" || knob.Writer.FixedArguments["key"] != setting {
+		t.Fatalf("agy catalog writer = %+v", knob.Writer)
+	}
+	if got := configGetJSON(t, server, 930412, map[string]any{"session_key": key, "key": setting}); got.Value != float64(120) || got.Scope != "builtin" {
+		t.Fatalf("agy config.get before tune = %+v", got)
+	}
+	if resp := keyedCall(t, server, 930413, key, "config.tune", map[string]any{"key": setting, "value": "45", "scope": "project"}); toolIsError(t, resp) {
+		t.Fatalf("Claude project tune failed: %s", resp)
+	}
+	if got := configGetJSON(t, server, 930414, map[string]any{"session_key": key, "key": setting}); got.Value != float64(45) || got.Scope != "project" {
+		t.Fatalf("agy config.get after tune = %+v", got)
+	}
+}
+
+func TestAgyManifestExposureAndValidationBothPackages(t *testing.T) {
+	useLeadProfile(t)
+	cases := []struct {
+		name           string
+		pluginDir      string
+		wantTimeoutDef float64
+		wantRetriesDef float64
+	}{
+		{name: "ws", pluginDir: filepath.Join("..", "..", "..", "agents-plugin"), wantTimeoutDef: 120, wantRetriesDef: 3},
+		{name: "wsflow", pluginDir: filepath.Join("..", "..", "..", "agents-plugin-wsflow"), wantTimeoutDef: 0, wantRetriesDef: 3},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			mustWrite(t, root, "README.md", "# Test\n")
+			initGit(t, root)
+			paths := []string{
+				filepath.Join(tc.pluginDir, "config-manifest.json"),
+				filepath.Join(tc.pluginDir, "agy-config-manifest.json"),
+				filepath.Join(tc.pluginDir, "dashboard-config-manifest.json"),
+			}
+			envMap := map[string]string{
+				envConfigManifests: strings.Join(paths, ";"),
+				"PATH":             os.Getenv("PATH"),
+				"WS_CACHE_HOME":    filepath.Join(t.TempDir(), "cache"),
+				"WS_CONFIG_HOME":   filepath.Join(t.TempDir(), "config"),
+				"WS_RSRC_ROOT":     filepath.Join(tc.pluginDir, "rsrc"),
+			}
+			if tc.name == "wsflow" {
+				envMap[envNamespace] = "wsflow"
+				envMap[envNoAgent] = "1"
+			}
+			server := NewServerWithOptions(ServerOptions{
+				Root: root, Version: "test", Harness: "claude", Env: EnvFromMap(envMap),
+			})
+			t.Cleanup(server.Close)
+			key, _ := parseLoginResponse(t, callLogin(t, server, 930420, root, nil))
+
+			listResp := keyedCall(t, server, 930421, key, "config.list", map[string]any{"format": "json"})
+			var view configListView
+			if err := json.Unmarshal([]byte(toolText(t, listResp)), &view); err != nil {
+				t.Fatalf("config.list json: %v", err)
+			}
+			if len(view.ManifestErrors) != 0 {
+				t.Fatalf("unexpected manifest errors: %v", view.ManifestErrors)
+			}
+			for _, setting := range []string{"agy.model_wait_timeout_seconds", "agy.model_wait_retries"} {
+				knob := requireTuningKnob(t, tuningCatalog{Knobs: view.Knobs}, setting)
+				if knob.Writer.Tool != "config.tune" || knob.Writer.FixedArguments["key"] != setting {
+					t.Fatalf("%s writer = %+v", setting, knob.Writer)
+				}
+			}
+			if got := configGetJSON(t, server, 930422, map[string]any{"session_key": key, "key": "agy.model_wait_timeout_seconds"}); got.Value != tc.wantTimeoutDef || got.Scope != "builtin" {
+				t.Fatalf("timeout default = %+v, want %v", got, tc.wantTimeoutDef)
+			}
+			if got := configGetJSON(t, server, 930423, map[string]any{"session_key": key, "key": "agy.model_wait_retries"}); got.Value != tc.wantRetriesDef || got.Scope != "builtin" {
+				t.Fatalf("retries default = %+v, want %v", got, tc.wantRetriesDef)
+			}
+			for i, bad := range []string{"-1", "many"} {
+				resp := keyedCall(t, server, 930430+i, key, "config.tune", map[string]any{"key": "agy.model_wait_retries", "value": bad})
+				if !toolIsError(t, resp) || !strings.Contains(toolText(t, resp), "at least 0") {
+					t.Fatalf("config.tune(agy.model_wait_retries=%q) = %s, want integer >= 0 rejection", bad, resp)
+				}
+			}
+			if resp := keyedCall(t, server, 930440, key, "config.tune", map[string]any{"key": "agy.model_wait_retries", "value": "5", "scope": "project"}); toolIsError(t, resp) {
+				t.Fatalf("tune agy.model_wait_retries failed: %s", resp)
+			}
+			if got := configGetJSON(t, server, 930441, map[string]any{"session_key": key, "key": "agy.model_wait_retries"}); got.Value != float64(5) || got.Scope != "project" {
+				t.Fatalf("retries after tune = %+v, want 5 [project]", got)
+			}
+		})
 	}
 }
 
@@ -392,7 +525,7 @@ func TestConfigGetTypesAndFallbacks(t *testing.T) {
 // manifest would only log at startup and silently leave every adapter knob
 // untunable.
 func TestShippedAdapterManifestsLoad(t *testing.T) {
-	for _, path := range []string{piManifestPath, claudeManifestPath, wsflowClaudeManifestPath} {
+	for _, path := range []string{piManifestPath, claudeManifestPath, wsflowClaudeManifestPath, agyManifestPath, wsflowAgyManifestPath} {
 		declared := loadDeclaredConfig(path)
 		if len(declared.rejected) != 0 {
 			t.Fatalf("shipped manifest rejected: %v", declared.rejected)
@@ -409,6 +542,8 @@ var (
 	// wsflowClaudeManifestPath is the wsflow package's own Claude manifest:
 	// the same keys as claudeManifestPath, differing only in each default.
 	wsflowClaudeManifestPath = filepath.Join("..", "..", "..", "agents-plugin-wsflow", "config-manifest.json")
+	agyManifestPath          = filepath.Join("..", "..", "..", "agents-plugin", "agy-config-manifest.json")
+	wsflowAgyManifestPath    = filepath.Join("..", "..", "..", "agents-plugin-wsflow", "agy-config-manifest.json")
 )
 
 // The compaction-threshold grammar corpus: the Pi adapter-config test runs it

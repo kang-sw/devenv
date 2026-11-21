@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wsholder"
@@ -59,26 +60,46 @@ func (c *conv) startProcess() error {
 }
 
 func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
-	c.loadCompaction()
-	// No common worker selection or ceiling is applied in this slice.
+	releaseAdmission := func() {}
 	if !attach {
-		c.permissionNudge(legacyWorkerPermission(def), true, "")
+		releaseAdmission = c.r.holdParentAdmission(rec.Parent)
 	}
+	defer releaseAdmission()
+	c.mcpStale = false
+	c.loadCompaction()
+	c.loadModelWait()
 	if rec.Backend == BackendPi && !attach {
 		if err := c.r.checkChildProfile(rec.Parent, rec.Profile, def); err != nil {
 			return err
 		}
 	}
-	level := PermissionLevel("")
-	if !attach {
-		// Every launch re-admits a spawned child's authority against its
-		// parent's current level (agent_tools.go).
-		if err := c.r.childAdmission(rec); err != nil {
+	level, source := PermissionLevel(""), ""
+	if attach {
+		var err error
+		level, source, err = c.r.workerPermission(rec, def, c.dir)
+		if err != nil {
+			// A daemon replacement observes an existing held process instead of
+			// orphaning it solely because its selection cannot be read.
+			fmt.Fprintf(c.r.opts.Log, "agent %s: rejoin worker permission selection (advisory): %v\n", rec.ReplyID, err)
+			level, source = "", ""
+		}
+	} else {
+		// Every launch re-admits the worker's current explicit or legacy-derived
+		// authority against its parent's current level (agent_tools.go).
+		var err error
+		if level, source, err = c.r.childAdmission(rec, def); err != nil {
 			return err
 		}
-		level = childLevel(c.dir)
 	}
-	if rec.Backend == BackendPi && c.r.opts.Holders != nil && !attach {
+	c.setStatus(func() {
+		c.workerPermissionLevel = level
+		c.workerPermissionSource = source
+	})
+	if !attach {
+		// Emit only after reading the stored authority used for admission.
+		c.permissionNudge(level, true, "")
+	}
+	if c.r.opts.Holders != nil && !attach {
 		if !c.r.scanDone() {
 			return errors.New("holder scan is not complete")
 		}
@@ -133,6 +154,11 @@ func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
 		// An agent.spawn child delegates through agent.spawn only.
 		RemoveSubagents: RemovesSubagents(rec),
 	}
+	if attach {
+		for _, steer := range rec.Steered {
+			spec.RecoveredSteers = append(spec.RecoveredSteers, steer.Text)
+		}
+	}
 	if attach && len(def.WSTools) > 0 {
 		// The mapper needs the original ws tool surface, not a new bridge.
 		spec.WSMCP = &MCPCommand{}
@@ -166,7 +192,7 @@ func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
 			if !attach {
 				token, endpoint := c.r.issueToken(rec.ReplyID)
 				env[EnvPiToken], env[EnvPiEndpoint] = token, endpoint
-				if rec.Backend == BackendPi && c.r.opts.Holders != nil {
+				if c.r.opts.Holders != nil {
 					c.update(func(rec *Record) { rec.Capability = token })
 				}
 				rec.Capability = token
@@ -175,17 +201,22 @@ func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
 		cmd.Env = env
 		spec.WSMCP = &cmd
 		if c.r.opts.Backends[rec.Backend].WorkerHTTPMCP {
-			// Over the daemon's HTTP route when it has one; a worker is
-			// never held, so its token is never persisted.
-			spec.MCPSession = c.r.attachMCP(rec.ReplyID, "", env, rec.workDir(), 0)
+			// The same HTTP tuple is persisted with the holder after launch.
+			spec.MCPSession = c.r.attachMCP(rec.ReplyID, "", env, rec.workDir(), 0, rec.Backend)
 		}
 	}
-	if rec.Backend == BackendPi && c.r.opts.Holders != nil {
+	if c.r.opts.Holders != nil {
 		spec.Holder = &holderChild{host: c.r.opts.Holders, table: &c.r.holders,
-			session: holderSession{Kind: holderKindPiWorker, ReplyID: rec.ReplyID, Cwd: rec.workDir(), Capability: capabilityHash(rec.Capability)}}
+			session: holderSession{Kind: holderKindAgentWorker, Backend: rec.Backend, ReplyID: rec.ReplyID, Cwd: rec.workDir(), Capability: capabilityHash(rec.Capability)}}
 		if attach {
 			spec.Holder.id, spec.Holder.skipTo = rec.HolderID, rec.HolderSeq
+			spec.Holder.attachReady = make(chan struct{})
 		}
+	}
+	if attach && c.r.opts.Backends[rec.Backend].WorkerHTTPMCP {
+		// Let the backend reconstruct its filtered harness environment, but
+		// do not register a bearer before checkReattach validates ownership.
+		spec.MCPSession = &MCPSession{Started: func(env []string, _ int) { c.workerMCPEnv = env }}
 	}
 	if rec.Backend == BackendPi && !attach {
 		// Persist exactly the definition checked above and passed to Start,
@@ -208,16 +239,24 @@ func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
 		if held {
 			if attach {
 				c.replaying, c.seq = true, rec.HolderSeq
+				// Hold runner events until ownership and downgrade reconciliation
+				// finish; Scan may already be delivering buffered output.
+				c.events = nil
 				return nil
 			}
 			c.seq, c.seqDirty, c.live.ringDirty = 0, false, false
 			c.update(func(rec *Record) {
 				rec.HolderID, rec.HostPID, rec.HolderSeq = id, pid, 0
 				rec.SteerSeq, rec.SteerAnswers, rec.SteerAnswerSeq = 0, 0, 0
+				rec.HandedOffAt = c.r.opts.Now().UTC().Format(time.RFC3339)
+				rec.forgetMCP()
+				if s := spec.MCPSession; s != nil {
+					rec.MCPToken, rec.MCPURL, rec.MCPEnv, rec.MCPHolder = s.Token, s.URL, spec.WSMCP.Env, id
+				}
 			})
 		}
 	}
-	c.dirtyModel, c.dirtyEffort = false, false
+	c.dirtyModel, c.dirtyEffort, c.dirtyPermission = false, false, false
 	if def.ListInIndex != rec.Listed {
 		c.update(func(rec *Record) { rec.Listed = def.ListInIndex })
 		c.writeRegistration()
@@ -234,6 +273,7 @@ func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
 // reads it early waits rather than misreading an older PID.
 func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 	c.loadCompaction()
+	c.loadModelWait()
 	level, source, err := c.r.leadPermission(rec, c.dir)
 	if err != nil {
 		if !attach {
@@ -283,7 +323,7 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 		c.spawning = true
 		if !c.writeRegistration() {
 			c.spawning = false
-			if c.foreignRow {
+			if c.isForeign() {
 				return errHandedOff
 			}
 			return errors.New("the session's registration could not be written, so no process was started")
@@ -378,7 +418,7 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 		c.mcpStale = true
 	case attach && rec.MCPToken != "":
 		// The recorded token and hello, as the process was started with.
-		spec.MCPSession = c.r.attachMCP(rec.ReplyID, rec.MCPToken, rec.MCPEnv, rec.workDir(), rec.HostPID)
+		spec.MCPSession = c.r.attachMCP(rec.ReplyID, rec.MCPToken, rec.MCPEnv, rec.workDir(), rec.HostPID, rec.Backend)
 	case (rec.Backend == BackendClaude || rec.Backend == BackendAgy || rec.Backend == BackendCodex) && !attach:
 		// The lead's ws-mcp goes over the daemon's HTTP route with a new
 		// token. Without a route a Claude lead runs the same server over
@@ -394,7 +434,7 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 		if rec.Backend == BackendClaude {
 			spec.WSMCP, spec.Lead.PluginNote = &cmd, cmd.PluginWarning
 		}
-		if spec.MCPSession = c.r.attachMCP(rec.ReplyID, "", cmd.Env, rec.workDir(), 0); spec.MCPSession != nil {
+		if spec.MCPSession = c.r.attachMCP(rec.ReplyID, "", cmd.Env, rec.workDir(), 0, rec.Backend); spec.MCPSession != nil {
 			mcpEnv = cmd.Env
 		}
 	}
@@ -437,14 +477,16 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 		c.r.revokeToken(rec.ReplyID)
 		return fmt.Errorf("the %s backend did not start the process under a session holder", rec.Backend)
 	}
-	c.setStatus(func() { c.proc = proc })
+	// A process-scoped observation cannot carry into a new process or holder
+	// attach. Replay/open reports repopulate it; silence stays unknown.
+	c.setStatus(func() { c.proc, c.activeMode = proc, "" })
 	c.events = proc.Events()
 	c.idleAfter = def.IdleTimeout()
 	if attach {
 		c.replaying, c.seq = true, rec.HolderSeq
 		return nil
 	}
-	c.dirtyModel, c.dirtyEffort, c.dirtyMode, c.reconcileMode = false, false, false, false
+	c.dirtyModel, c.dirtyEffort, c.dirtyMode, c.dirtyPermission, c.reconcileMode = false, false, false, false, false
 	c.seq, c.seqDirty, c.live.ringDirty = 0, false, false
 	c.update(func(rec *Record) {
 		rec.HolderID, rec.HostPID, rec.HolderSeq = id, pid, 0
@@ -473,7 +515,12 @@ func (c *conv) retireHolder() error {
 			return fmt.Errorf("the session's previous process could not be ended (holder %s): %w", id, err)
 		}
 	}
-	c.update(func(rec *Record) { rec.HolderID, rec.HostPID, rec.HolderSeq = "", 0, 0 })
+	c.update(func(rec *Record) {
+		rec.HolderID, rec.HostPID, rec.HolderSeq = "", 0, 0
+		if !rec.Lead {
+			rec.HandedOffAt = ""
+		}
+	})
 	c.writeRegistration()
 	return nil
 }
@@ -520,23 +567,51 @@ func (c *conv) checkReattach() {
 	if !ok {
 		return
 	}
+	if c.workerRetiring {
+		c.retireDowngradedWorker(hp)
+		return
+	}
 	id, _, _ := hp.HolderInfo()
 	listed, attached := false, false
 	for _, info := range c.r.opts.Holders.List().Holders {
 		if info.ID == id {
 			listed, attached = true, info.Attached
+			if !attached {
+				continue
+			}
 			if !c.rec.Lead {
 				var meta holderSession
-				if json.Unmarshal(info.Session, &meta) != nil || meta.Kind != holderKindPiWorker || meta.ReplyID != c.rec.ReplyID || meta.Capability != capabilityHash(c.rec.Capability) || (info.Child != nil && c.rec.HostPID != 0 && info.Child.PID != c.rec.HostPID) {
+				if json.Unmarshal(info.Session, &meta) != nil || !workerHolderMatches(c.rec, meta, info.Child) {
 					// Never stop a holder that failed the ownership check.
+					c.r.holders.reject(id)
 					hp.Detach()
 					c.setStatus(func() { c.proc = nil })
 					c.events = nil
-					c.update(func(rec *Record) { rec.HolderID, rec.HostPID, rec.HolderSeq = "", 0, 0 })
+					c.update(func(rec *Record) {
+						rec.HolderID, rec.HostPID, rec.HolderSeq = "", 0, 0
+						if !rec.Lead {
+							rec.HandedOffAt = ""
+						}
+					})
 					c.recoveryFailed("held process association does not match the worker record")
 					return
 				}
+				if c.retireDowngradedWorker(hp) {
+					return
+				}
+				rec := c.record()
+				rp, resolveErr := c.r.resolve(rec.Profile, rec.Root)
+				if resolveErr != nil {
+					fmt.Fprintf(c.r.opts.Log, "agent %s: rejoin permission admission (advisory; applies on next launch): %v\n", c.rec.ReplyID, resolveErr)
+				} else if _, _, err := c.r.childAdmission(rec, rp.Definition); err != nil {
+					fmt.Fprintf(c.r.opts.Log, "agent %s: rejoin permission admission (advisory; applies on next launch): %v\n", c.rec.ReplyID, err)
+				}
 				c.r.restoreToken(c.record())
+				c.restoreWorkerMCP()
+				c.events = c.proc.Events()
+				if gated, ok := c.proc.(interface{ allowHolderReplay() }); ok {
+					gated.allowHolderReplay()
+				}
 			}
 		}
 	}
@@ -626,7 +701,7 @@ func (c *conv) replayDone(lost bool) {
 // recoveryFailed settles once, ends the unrecoverable transport, and never
 // launches another process on the strength of a failed probe.
 func (c *conv) recoveryFailed(reason string) {
-	text := "Pi worker recovery failed: " + reason
+	text := "Worker recovery failed: " + reason
 	c.setStatus(func() { c.turn = false; c.lastErr = text })
 	if c.rec.TurnOpen {
 		c.settleTurn(TurnFailed, text, c.turnMark)
@@ -743,9 +818,9 @@ func (c *conv) persistSeq() {
 // composeInstructions writes the instruction file a process appends to the
 // harness's own system prompt: agent.spawn's system prompt, the profile's
 // instruction file or builtin text and, when the profile allows ws tools,
-// the conversation's ws session key followed by steer, the native-subagent
-// line (Runner.subagentSteer; "" for none). It returns "" when there is
-// nothing to append.
+// the conversation's ws session key and direct parent's reply address,
+// followed by steer, the native-subagent line (Runner.subagentSteer; "" for
+// none). It returns "" when there is nothing to append.
 func composeInstructions(dir string, rec Record, p Profile, system, steer string) (string, error) {
 	var parts []string
 	if text := strings.TrimSpace(system); text != "" {
@@ -761,7 +836,10 @@ func composeInstructions(dir string, rec Record, p Profile, system, steer string
 		parts = append(parts, strings.TrimSpace(string(raw)))
 	}
 	if len(p.WSTools) > 0 {
-		key := fmt.Sprintf("Your ws session key is `%s`. Pass it as the `session_key` argument of every ws tool call.", rec.WSKey)
+		key := fmt.Sprintf("Your ws session key is `%s`. Pass it as the `session_key` argument of every ws tool call. This key is bound to worktree `%s`; if work moves to another worktree, use a key minted for that destination (from a direct spawn there or a legitimate acquisition that returns one), because this key is never rebound.", rec.WSKey, rec.Root)
+		if rec.Parent != nil {
+			key += fmt.Sprintf(" Your direct parent's mailbox reply address is `id:%s`; send it reports or questions with `mailbox.send`.", rec.Parent.ReplyID)
+		}
 		if steer != "" {
 			key += " " + steer
 		}

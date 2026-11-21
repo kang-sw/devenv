@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/kang-sw/devenv/internal/mcpframe"
 	"github.com/kang-sw/devenv/internal/wsdoc"
 	"github.com/kang-sw/devenv/internal/wsindex"
 	"github.com/kang-sw/devenv/internal/wslive"
@@ -19,6 +21,8 @@ import (
 )
 
 type Server struct {
+	boardOwner bool
+
 	root              string
 	version           string
 	sourceCommit      string
@@ -197,7 +201,7 @@ func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) er
 		defer close(reconnectDone)
 		s.dashboardReconnect()
 	}()
-	scanner := bufio.NewScanner(in)
+	reader := bufio.NewReader(in)
 	encoder := json.NewEncoder(out)
 	var writeMu sync.Mutex
 	var wg sync.WaitGroup
@@ -229,14 +233,32 @@ func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) er
 		s.dashboardEnd()
 	}()
 
-	for scanner.Scan() {
+	var readErr error
+	for {
+		line, tooLarge, err := mcpframe.ReadLine(reader, mcpframe.MaxRequestBytes)
+		if err != nil {
+			if !errors.Is(err, io.EOF) {
+				readErr = err
+			}
+			break
+		}
 		select {
 		case <-ctx.Done():
 			wg.Wait()
 			return ctx.Err()
 		default:
 		}
-		line := scanner.Bytes()
+		if tooLarge {
+			id := mcpframe.ExtractID(line)
+			if len(id) == 0 {
+				id = json.RawMessage("null")
+			}
+			s.debugEvent("request.too_large", map[string]any{"id": rawMessageString(id), "limit": mcpframe.MaxRequestBytes})
+			if err := writeResponse(errorResponse(id, -32600, mcpframe.TooLargeMessage(mcpframe.MaxRequestBytes))); err != nil {
+				return err
+			}
+			continue
+		}
 		if len(line) == 0 {
 			continue
 		}
@@ -307,10 +329,9 @@ func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) er
 			}
 		}()
 	}
-	err := scanner.Err()
 	stopPresenceTicker()
 	wg.Wait()
-	return err
+	return readErr
 }
 
 func (s *Server) handleNotification(req request, requests *sync.Map) {
@@ -343,7 +364,7 @@ func (s *Server) handle(ctx context.Context, req request) response {
 	switch req.Method {
 	case "initialize":
 		s.observePiDaemonAgents(req.Params)
-		s.observeHarness("initialize", detectHarnessFromInitializeParams(req.Params))
+		s.observeHarness("initialize", s.detectHarnessFromInitializeParams(req.Params))
 		// No session/root exists yet at this call: a machine-scope identity
 		// registers immediately (needs no root); a worktree/clone identity
 		// defers until a session-bound root arrives via the owning ferrule

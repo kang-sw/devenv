@@ -1,5 +1,5 @@
 ---
-title: "Pi source-tree tests fetch the release ws-mcp, so a runtime.json tool addition breaks real-child tests"
+title: "Pi 소스 트리 테스트가 릴리스 ws-mcp를 가져와 runtime.json 도구 추가 시 실제 자식 테스트가 깨지는 문제"
 ---
 
 ## Observation (2026-11-07, dogfood)

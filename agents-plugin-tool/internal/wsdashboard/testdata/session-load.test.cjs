@@ -91,7 +91,7 @@ function scrollFixture(storage = {}, pathname = '/s/a', hash = '') {
     addEventListener(type, cb) { listeners[type] = cb; }, removeEventListener(type) { delete listeners[type]; }};
   const reloadKey = 'ws.dashboard.board-reload.' + pathname + '?frame=1';
   const c = vm.createContext({ shell: false, framed: true, location: {pathname, hash, search: '?frame=1'}, BOARD_RELOAD: reloadKey,
-    PANES: ['convo', 'bcol', 'r-tree', 'bpins', 'drbody'], convo: nodes.convo, entriesBox: () => box,
+    PANES: ['convo', 'bcol', 'r-tree', 'drbody'], convo: nodes.convo, entriesBox: () => box,
     atBottom: () => nodes.convo.scrollTop + nodes.convo.clientHeight >= nodes.convo.scrollHeight - 24,
     boardBoxes: () => [nodes.bcol], boardLivePanels: () => [panel], boardScroller: () => nodes.bcol, boardWithSnap: fn => fn(),
     boardPanelKey: n => n.id, topicKey: n => n.key, q: () => [topic],
@@ -190,12 +190,12 @@ test('scroll restore respects hashes/input, bottom-follow, denied storage and ca
 
 test('framed main script uses one shared content-addressed static request', () => {
   const root = path.join(__dirname, '..');
-  const pages = fs.readFileSync(path.join(root, 'pages.go'), 'utf8');
+  const pageRoutes = fs.readFileSync(path.join(root, 'page_routes.go'), 'utf8');
   const template = read('wsdashboard', 'dashboard.tmpl');
   assert.match(template, /\{\{if \.Frame\}\}<script src="\/s\/\{\{\.Assets.ScriptFile\}\}"><\/script>\{\{else\}\}<script>\{\{\.Assets.Script\}\}/);
   const assets = fs.readFileSync(path.join(root, 'frame_assets.go'), 'utf8');
   assert(assets.includes('d.ScriptFile = add(string(d.Script), "js")'));
-  assert(pages.includes('file, ok := a.files[rest]'));
+  assert(pageRoutes.includes('file, ok := a.files[rest]'));
   new vm.Script(read('wsdashboard', 'dashboard.js'));
   const lifecycle = read('wsdashboard', 'dashboard-lifecycle.js');
   assert(lifecycle.indexOf('wsSaveSessionView();') < lifecycle.indexOf('location.replace("about:blank")'));

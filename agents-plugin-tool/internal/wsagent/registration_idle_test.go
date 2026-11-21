@@ -19,13 +19,13 @@ func TestRegistrationHeartbeatFailureAndLiveness(t *testing.T) {
 	now := time.Unix(1000, 0).UTC()
 	r := NewRunner(Options{Dir: dir, Now: func() time.Time { return now }, Log: io.Discard})
 	c := &conv{r: r, rec: Record{ReplyID: "idle", Root: base, Backend: "pi", CreatedAt: now.Format(time.RFC3339), Lead: true}}
-	if c.writeRegistration() || !c.lastReg.IsZero() {
+	if c.writeRegistration() || !c.lastRegAt().IsZero() {
 		t.Fatal("failed registration advanced the heartbeat")
 	}
 	if err := os.Remove(dir); err != nil {
 		t.Fatal(err)
 	}
-	if !c.writeRegistration() || !c.lastReg.Equal(now) {
+	if !c.writeRegistration() || !c.lastRegAt().Equal(now) {
 		t.Fatal("registration retry failed")
 	}
 	now = now.Add(time.Second)
@@ -33,11 +33,11 @@ func TestRegistrationHeartbeatFailureAndLiveness(t *testing.T) {
 		t.Fatal("unchanged registration failed")
 	}
 	row, err := wsdashboard.ReadRegistration(dir, "idle")
-	if err != nil || row.HeartbeatAt != c.lastReg.UTC().Format(time.RFC3339) || c.lastReg.Equal(now) {
+	if err != nil || row.HeartbeatAt != c.lastRegAt().UTC().Format(time.RFC3339) || c.lastRegAt().Equal(now) {
 		t.Fatalf("unchanged write moved the heartbeat: %+v, %v", row, err)
 	}
 	c.rec.HostPID = 123
-	if !c.writeRegistration() || !c.lastReg.Equal(now) {
+	if !c.writeRegistration() || !c.lastRegAt().Equal(now) {
 		t.Fatal("semantic registration change was skipped")
 	}
 	// Missing, unreadable and altered same-owner rows must be repaired even
@@ -64,7 +64,7 @@ func TestRegistrationHeartbeatFailureAndLiveness(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		if !c.writeRegistration() || !c.lastReg.Equal(now) {
+		if !c.writeRegistration() || !c.lastRegAt().Equal(now) {
 			t.Fatalf("%s row not repaired", broken)
 		}
 		row, err := wsdashboard.ReadRegistration(dir, "idle")
@@ -93,7 +93,60 @@ func TestRegistrationHeartbeatFailureAndLiveness(t *testing.T) {
 	if err := wsdashboard.WriteRegistration(dir, row); err != nil {
 		t.Fatal(err)
 	}
-	if c.writeRegistration() || !c.foreignRow {
+	if c.writeRegistration() || !c.isForeign() {
 		t.Fatal("terminal handoff was overwritten")
+	}
+}
+
+func TestHeartbeatRegistrationPrecedesBlockedSnapshot(t *testing.T) {
+	base := t.TempDir()
+	now := time.Unix(1000, 0).UTC()
+	r := NewRunner(Options{Dir: base, Now: func() time.Time { return now }, Log: io.Discard})
+	rec := Record{
+		ReplyID: "hosted",
+		Root:    t.TempDir(),
+		Backend: BackendPi,
+		Lead:    true,
+		HostPID: 42,
+	}
+	c := &conv{r: r, rec: rec}
+	c.live = newLiveWriter(wsdashboard.SessionDir(base, rec.ReplyID), rec.ReplyID, rec.Backend, r.opts.Now, io.Discard)
+	c.live.setSlot(&idleSnapshotSlot{})
+	c.live.owner = c.lockSummaryWriter
+	r.setSummaryOwner(rec.ReplyID, c)
+
+	snapshotStarted := make(chan struct{})
+	c.live.beforeSnapshot = func() { close(snapshotStarted) }
+	summaryLock := r.summaryLock(rec.ReplyID)
+	summaryLock.Lock()
+	locked := true
+	defer func() {
+		if locked {
+			summaryLock.Unlock()
+		}
+	}()
+	done := make(chan struct{})
+	go func() {
+		c.heartbeat()
+		close(done)
+	}()
+	select {
+	case <-snapshotStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("heartbeat did not reach snapshot publication")
+	}
+	row, err := wsdashboard.ReadRegistration(base, rec.ReplyID)
+	summaryLock.Unlock()
+	locked = false
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("heartbeat did not finish after summary writer was released")
+	}
+	if err != nil {
+		t.Fatalf("registration was not refreshed before blocked snapshot publication: %v", err)
+	}
+	if row.HeartbeatAt != now.Format(time.RFC3339) {
+		t.Fatalf("registration heartbeat = %q, want %q", row.HeartbeatAt, now.Format(time.RFC3339))
 	}
 }

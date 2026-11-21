@@ -1,5 +1,5 @@
 ---
-title: "Serial lead-run worker can acquire an unrequested second worktree"
+title: "직렬 lead-run 워커가 요청되지 않은 두 번째 worktree를 획득할 수 있는 문제"
 related:
   260910-feat-lead-run-worktree-parallel-route: defines worktree provisioning as an explicitly user-gated parallel-route behavior
 ---

@@ -8,6 +8,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -354,5 +355,125 @@ func TestPlanUsageHistoryMixedVersionNonDestruction(t *testing.T) {
 	}
 	if got := restored.history(now); len(got.Samples) != 2 {
 		t.Fatal("new reader lost mixed-version history")
+	}
+}
+
+func TestPlanUsageAgyT0CompatibilityLeavesExistingFilesUnchanged(t *testing.T) {
+	now := time.Date(2026, 11, 19, 12, 0, 0, 0, time.UTC)
+	reset5h := now.Add(3 * time.Hour).Format(time.RFC3339)
+	resetWeekly := now.Add(4 * 24 * time.Hour).Format(time.RFC3339)
+	s, _, _ := fakeAgyEnv(t, "cat <<'EOF'\n"+validAgyFixtureJSON(reset5h, resetWeekly)+"\nEOF")
+	s.now = func() time.Time { return now }
+
+	at := now.UnixMilli()
+	s.claude = planUsageEntry{Harness: "claude", Source: "Claude push", AsOf: at, Windows: []planUsageWindow{{Kind: "five_hour", Percent: 33.5, ResetsAt: at + 3600000, AsOf: at}}}
+	s.gpt = planUsageEntry{Harness: "codex", Plan: "pro", Source: "via Pi", AsOf: at, Windows: []planUsageWindow{{Kind: "seven_day", Percent: 45, ResetsAt: at + 86400000, AsOf: at}}}
+	s.saveLocked()
+	s.appendHistoryLocked(append(usageSamples(s.claude), usageSamples(s.gpt)...), at)
+
+	baselineLatest, err := os.ReadFile(filepath.Join(s.dir, planUsageCache))
+	if err != nil {
+		t.Fatal(err)
+	}
+	baselineHistory := historyBytes(t, s)
+
+	// Run agy probe, creating plan-usage-agy.json and plan-usage-agy-history.json.
+	s.refresh(context.Background(), true)
+	s.probes.Wait()
+	if _, err := os.Stat(filepath.Join(s.dir, planUsageAgyCache)); err != nil {
+		t.Fatalf("missing %s: %v", planUsageAgyCache, err)
+	}
+	if _, err := os.Stat(filepath.Join(s.dir, planUsageAgyHistoryCache)); err != nil {
+		t.Fatalf("missing %s: %v", planUsageAgyHistoryCache, err)
+	}
+
+	// plan-usage.json and plan-usage-history.json must stay byte-for-byte identical.
+	afterLatest, _ := os.ReadFile(filepath.Join(s.dir, planUsageCache))
+	if !bytes.Equal(baselineLatest, afterLatest) {
+		t.Fatalf("agy probe changed %s:\nbefore: %s\nafter:  %s", planUsageCache, baselineLatest, afterLatest)
+	}
+	if !bytes.Equal(baselineHistory, historyBytes(t, s)) {
+		t.Fatalf("agy probe changed %s", planUsageHistoryCache)
+	}
+
+	// Old pinned readers and writers still read/write plan-usage.json and
+	// plan-usage-history.json cleanly while ignoring both new agy files.
+	pinnedUsageReadWrite(t, s.dir)
+	oldHist := &pinnedHistoryStore{dir: s.dir}
+	h, err := oldHist.pinnedHistoryRead()
+	if err != nil || len(h.Records) != 2 {
+		t.Fatalf("pinned history reader failed with agy files present: len=%d err=%v", len(h.Records), err)
+	}
+	appended := pinnedHistorySample{Harness: "codex", Kind: "seven_day", Source: "via Pi", Percent: 50, ResetsAt: at + 86400000, AsOf: at + 1000}
+	oldHist.pinnedHistoryAppend([]pinnedHistorySample{appended}, appended.AsOf)
+
+	// New store reopen restores Claude, Codex, and both agy files intact.
+	reopened := newPlanUsageStore(s.dir, s.home, s.getenv)
+	reopened.now = func() time.Time { return now }
+	if len(reopened.agyGroups) != 2 {
+		t.Fatalf("reopened store lost agy cache after old writer ran: %+v", reopened.agyGroups)
+	}
+	if got := reopened.agyHistory(at); got.Status != "ok" || len(got.Samples) != 4 {
+		t.Fatalf("reopened store lost agy history after old writer ran: %+v", got)
+	}
+	if got := reopened.history(appended.AsOf); got.Status != "ok" || len(got.Samples) != 3 {
+		t.Fatalf("reopened store lost existing history: %+v", got)
+	}
+}
+
+func TestPlanUsageCodexFiveHourT0CompatibilityAndSeparateFile(t *testing.T) {
+	s := usageTestStore(t)
+	setCodexUsageAuth(t, s, `{"auth_mode":"chatgpt","tokens":{"access_token":"fake-access"}}`)
+	bodyBoth := `{"plan_type":"pro","rate_limit":{"primary_window":{"used_percent":22,"limit_window_seconds":18000,"reset_at":2099000000},"secondary_window":{"used_percent":48,"limit_window_seconds":604800,"reset_at":2100000000}}}`
+	s.client.Transport = usageRoundTrip(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(bodyBoth))}, nil
+	})
+	s.query(context.Background(), false)
+
+	// Shared plan-usage-history.json must stay readable by the pinned old validator
+	// (no Codex five_hour sample may ever land there).
+	oldHist := &pinnedHistoryStore{dir: s.dir}
+	h, err := oldHist.pinnedHistoryRead()
+	if err != nil || len(h.Records) != 1 || h.Records[0].Sample.Harness != "codex" || h.Records[0].Sample.Kind != "seven_day" {
+		t.Fatalf("pinned history reader failed or saw codex 5h: len=%d err=%v recs=%+v", len(h.Records), err, h.Records)
+	}
+	// Codex five_hour sample lands exclusively in plan-usage-codex-history.json.
+	now := time.Now().UnixMilli()
+	codexHist := s.codexFiveHourHistory(now)
+	if codexHist.Status != "ok" || len(codexHist.Samples) != 1 || codexHist.Samples[0].Kind != "five_hour" || codexHist.Samples[0].Percent != 22 {
+		t.Fatalf("codex 5h history = %+v", codexHist)
+	}
+	if _, err := os.Stat(filepath.Join(s.dir, planUsageCodexHistoryCache)); err != nil {
+		t.Fatalf("missing %s: %v", planUsageCodexHistoryCache, err)
+	}
+
+	// /rail/usage?history=1 emits codexFiveHourHistory when samples exist, and omits
+	// it when no Codex five_hour samples exist.
+	d := &Daemon{dir: s.dir, planUsage: s}
+	rec := httptest.NewRecorder()
+	d.handlePlanUsage(rec, httptest.NewRequest(http.MethodGet, "/rail/usage?history=1", nil))
+	var with5h map[string]json.RawMessage
+	if err := json.Unmarshal(rec.Body.Bytes(), &with5h); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := with5h["codexFiveHourHistory"]; !ok {
+		t.Fatalf("expected codexFiveHourHistory when samples exist: %s", rec.Body.String())
+	}
+
+	sWeeklyOnly := usageTestStore(t)
+	setCodexUsageAuth(t, sWeeklyOnly, `{"auth_mode":"chatgpt","tokens":{"access_token":"fake-access"}}`)
+	sWeeklyOnly.client.Transport = usageRoundTrip(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(weeklyUsageBody))}, nil
+	})
+	sWeeklyOnly.query(context.Background(), false)
+	dWeekly := &Daemon{dir: sWeeklyOnly.dir, planUsage: sWeeklyOnly}
+	rec2 := httptest.NewRecorder()
+	dWeekly.handlePlanUsage(rec2, httptest.NewRequest(http.MethodGet, "/rail/usage?history=1", nil))
+	var without5h map[string]json.RawMessage
+	if err := json.Unmarshal(rec2.Body.Bytes(), &without5h); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := without5h["codexFiveHourHistory"]; ok {
+		t.Fatalf("unexpected codexFiveHourHistory without 5h samples: %s", rec2.Body.String())
 	}
 }

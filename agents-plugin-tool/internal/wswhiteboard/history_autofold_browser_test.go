@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/kang-sw/devenv/internal/wsi18n"
 )
 
 // History an owner loaded above a fold folds back into the gap once the whole
@@ -29,10 +31,16 @@ func TestHistoryAutoFoldBrowser(t *testing.T) {
 			mustApply(t, st, fmt.Sprintf(`<wb:topic name="%s"><wb:log>%s log %d: a reasonably long line of text for the history window</wb:log></wb:topic>`, topic, topic, i))
 		}
 	}
-	page, err := RenderPage(BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "fold", Location: time.UTC}))
+	view := BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "fold", Location: time.UTC})
+	regions, err := RenderRegions(view)
 	if err != nil {
 		t.Fatal(err)
 	}
+	assets, err := PageAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := `<!DOCTYPE html><html><head><style>` + string(assets.CSS) + `</style></head><body>` + string(assets.Sprite) + `<main>` + string(regions.Board) + `</main><aside>` + string(regions.Panels) + `</aside><script>` + string(wsi18n.Script(view.Lang)) + `</script><script>` + string(assets.AnswersScript) + `</script><script>(function(){` + string(assets.FormScript) + `})();</script></body></html>`
 	path := filepath.Join(dir, "board.html")
 	if err := os.WriteFile(path, []byte(page), 0o600); err != nil {
 		t.Fatal(err)

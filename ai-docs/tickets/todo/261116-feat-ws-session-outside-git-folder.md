@@ -1,5 +1,5 @@
 ---
-title: Create a ws session in a folder that is not a Git repository
+title: "Git 저장소가 아닌 폴더에서도 ws 세션 생성 지원"
 ---
 
 # Create a ws session in a folder that is not a Git repository

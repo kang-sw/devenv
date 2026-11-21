@@ -56,6 +56,21 @@ const fits = (s, what) => {
       assert(layout.convoTop < 4, 'the conversation starts at the top of its column: ' + layout.convoTop);
       let s = await state(frame);
       assert(!s.open && s.expanded === 'false', 'closed at load');
+      assert.equal(s.mode, 'compact', 'live running/failed agents start in compact HUD mode');
+      const compactHud = await frame.evaluate(() => {
+        const nodes = [...document.querySelectorAll('#agcompact .hud-node')];
+        const sum = document.querySelector('#agcompact .hud-summary-text')?.textContent.trim();
+        const svgPath = document.querySelector('#agcompact .hud-lines path')?.getAttribute('d') || '';
+        return { count: nodes.length, sum, hasPath: svgPath.includes('M') };
+      });
+      assert.deepEqual(compactHud, { count: 4, sum: '완료 3 · 피어 1', hasPath: true }, 'compact HUD renders visible forest, 완료 count, and SVG connectors');
+      // Container click outside button/node does not open #agpop; expand button does.
+      await frame.click('#agcompact .hud-footer', { position: { x: 4, y: 4 } });
+      assert.equal((await state(frame)).open, false, 'compact container click does not open full popover');
+      await frame.click('#agcompact .hud-expand-btn');
+      assert.equal((await state(frame)).open, true, 'expand button opens full popover');
+      assert.equal(await frame.getAttribute('#agcompact .hud-expand-btn', 'aria-expanded'), 'true');
+      await frame.click('#agclose');
       assert.match(s.label, /^2\(\+1\)\s*실행 중$/, 'badge shows the running count');
       await shot(tab, `closed-${scheme}-1440`);
       // Open: the island expands to full, top-right in the conversation cell.
@@ -206,6 +221,8 @@ const fits = (s, what) => {
         assert.deepEqual([idle.visible, idle.idle, idle.count, idle.spinner], [true, true, '0', 'none'], `${what}: zero badge stays visible and quiet`);
         assert.equal(idle.color, idle.muted, `${what}: badge uses the muted color`);
         assert.equal((await state(frame)).open, false, `${what}: starts closed`);
+        assert.equal((await state(frame)).mode, 'idle', `${what}: empty HUD forest drops to idle pill`);
+        assert.equal(await frame.textContent('#agidle .agidle-label'), '완료 1', `${what}: idle pill matches HUD.Completed`);
         await frame.click('#sbadge');
         const s = await state(frame);
         assert(s.open && s.expanded === 'true', `${what}: zero badge opens the island`);

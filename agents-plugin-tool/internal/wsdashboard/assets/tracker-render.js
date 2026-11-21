@@ -54,7 +54,7 @@
   function setInert(on) {
     if (!on) { inerted.forEach(function (el) { el.inert = false; }); inerted = []; return; }
     if (inerted.length) return;
-    var keep = [$('tkwin'), $('tkdlg'), $('tkqpop'), $('tktoast'), $('wstoasts'), $('tktip'), $('tkmenu')];
+    var keep = [$('tkwin'), $('tkdlg'), $('tkpm'), $('tkqpop'), $('tktoast'), $('wstoasts'), $('tktip'), $('tkmenu')];
     Array.prototype.forEach.call(document.body.children, function (el) {
       if (keep.indexOf(el) < 0 && !el.inert) { el.inert = true; inerted.push(el); }
     });
@@ -932,13 +932,19 @@
   var tipFor = null;
   function showTip(el) {
     var t = $('tktip'), up = el.matches('.kcard, .citem') ? parentTip(el) : '';
+    var parent = (el.closest && el.closest('dialog[open]')) || document.body;
+    if (t.parentNode !== parent) parent.appendChild(t);
     tipFor = el; t.textContent = el.getAttribute('data-tip') + (up ? '\n' + up : ''); t.hidden = false;
     var r = el.getBoundingClientRect(), w = t.offsetWidth, h = t.offsetHeight;
     var x = Math.max(6, Math.min(r.left + r.width / 2 - w / 2, window.innerWidth - w - 6)), y = r.bottom + 6;
     if (y + h > window.innerHeight - 6) y = r.top - h - 6;
     t.style.left = Math.round(x) + 'px'; t.style.top = Math.round(y) + 'px';
   }
-  function hideTip() { tipFor = null; $('tktip').hidden = true; }
+  function hideTip() {
+    var t = $('tktip');
+    tipFor = null; t.hidden = true;
+    if (t.parentNode !== document.body) document.body.appendChild(t);
+  }
   // Kanban and calendar cards stay independent tasks. Hovering or focusing one marks its direct
   // parent's and direct children's cards in the same view (lk-par, lk-kid); the card's tooltip
   // names the parent when its card is not on screen (another month, or scrolled out of view).
@@ -984,7 +990,7 @@
   function placeShownMore() { Array.prototype.forEach.call(document.querySelectorAll('.tk .irow:hover, .tk .irow:focus-within, .tk .irow.sel'), placeMore); }
   var lastPointer = 'mouse', lastInput = 'pointer'; // the focused row is restored after a re-render only for keyboard use
 
-  var QUICK = { confirm: 1, unassign: 1, accept: 1, ihide: 1, chide: 1, comment: 1, claim: 1, unopen: 1, approve: 1, unrequest: 1, uncc: 1 };
+  var QUICK = { confirm: 1, unassign: 1, accept: 1, ihide: 1, chide: 1, comment: 1, claim: 1, unopen: 1, approve: 1, unrequest: 1, uncc: 1, 'uncc-org': 1 };
   // the item menu's steps an action button opens (in the menu, or a menu anchored to the button)
   var STEPS = { note: 1, handoff: 1, assign: 1, pri: 1, due: 1, labels: 1, move: 1, opening: 1, request: 1, wrap: 1, cc: 1 };
 

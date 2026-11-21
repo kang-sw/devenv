@@ -36,41 +36,57 @@
   // pinned, unpinned, and dragged like a card. Only a topic pinned or moved
   // by hand has a record.
   //
-  // Placement is one rule for cards and topics. Pinned ones stand first, in
-  // pin order, in the pin list: the head of the board column, or the pinned
-  // column beside it where the page shows one (opt.column). An unpinned
-  // card enters at the head of the unpinned flow when it opens (bump counts
-  // as an open); after that it only moves down, as a topic updated after
-  // the card opened rises above it. A card's open time is kept with its
-  // view state, so a reload puts it back where it stood among the topics.
-  // Topics otherwise keep the board's own order. Dragging a header moves a
-  // card or a topic: within the pin list it reorders the pins, into the
-  // board's open flow it unpins and stands where it was dropped (a time
-  // between its new neighbours'), into the pin list it pins. A topic moved
-  // by hand keeps that time until the topic itself next updates; a closed
-  // topic stands only in the closed section or the pin list. A pinned topic
-  // keeps its place when it updates or closes, and the page keeps its last
+  // Placement is one rule for cards and topics. Pinned (docked) ones stand
+  // in the paged docking gallery (#bgal, built here): a sequence of pages,
+  // each a split tree of panes (the model, page order and which page shows
+  // are WsGallery's, gallery.js), with a trailing empty page (+) and a dot
+  // rail. In the wide view the page shows it as a column beside the board;
+  // in the narrow view the Main Board is Page 0 of the same rail and the
+  // gallery overlays the board's column (opt.mode, opt.layout). A unit's
+  // pinned is its flat pin order (WsGallery.ordinals), 0 when not docked.
+  // An unpinned card enters at the head of the unpinned flow when it opens
+  // (bump counts as an open); after that it only moves down, as a topic
+  // updated after the card opened rises above it. A card's open time is
+  // kept with its view state, so a reload puts it back where it stood among
+  // the topics. Topics otherwise keep the board's own order. Dragging a
+  // header moves a card or a topic: onto a rail dot it docks (+: a new
+  // page; a page's dot: below what that page holds; the narrow view's home
+  // dot: undocks), onto a pane of the page shown it docks at that pane's
+  // zone (an edge splits the pane; the center, offered to a docked pane
+  // only, swaps the two), into the board's open flow it undocks and stands
+  // where it was dropped (a time between its new neighbours'). A topic moved by
+  // hand keeps that time until the topic itself next updates; a closed
+  // topic stands only in the closed section or the gallery. A docked topic
+  // keeps its pane when it updates or closes, and the page keeps its last
   // node when the board stops serving it (past the closed-topic cap); after
   // a reload such a topic is fetched through the closed route (opt.closed),
-  // and one the store no longer holds loses its pin.
+  // and one the store no longer holds leaves the gallery.
   //
   // A card's node is never moved by a board update: the board morph weaves
   // the cards into the nodes it wants (weave) and settles the board around
   // them (settle), so a frame or a video in a card keeps running. Only the
-  // card the user pins, unpins, or reopens moves, and where the browser has
-  // Element.moveBefore even that move keeps the card's state; a move between
-  // the board and the pinned column takes it too.
-  var doc = document;
+  // card the user docks, undocks, or reopens moves, and where the browser
+  // has Element.moveBefore even that move keeps the card's state. Switching
+  // pages moves nothing: inactive pages stay mounted, translated out of the
+  // gallery's clipped viewport.
+  var doc = document, G = window.WsGallery;
   var BASE = 260, MIN = 72, STEP = 24, PINW_MIN = 280, BOARDW_MIN = 400, CONVW_MIN = 320, SPLITB_MIN = 360;
   // A press drags past SLOP px; a touch drags after holding HOLD ms (the
   // session rail's drag thresholds), and EDGE px from a list's edge scrolls it.
   var SLOP = 5, HOLD = 380, EDGE = 28;
   var kinds = {}, cards = [], topics = {}, board = null, opt = null, maxed = null, scrim = null, seq = 0;
-  // pins is the pin list: after the toolbar in the board, or the pinned
-  // column's list while the page shows that column (colOn). boardw is the
-  // board's width beside the column as the user dragged it, convow the
-  // conversation's beside the board (0: the stylesheet's).
-  var pins = null, col = null, colOn = false, boardw = 0, convow = 0, zone = null;
+  // gal is the gallery's model (WsGallery), lay the layout the page shows
+  // it in (WsGallery.layout; null before mount). galEl is the gallery's
+  // element: a width handle, the dot rail (railEl, its dots in dotsEl) and
+  // the clipped viewport (viewEl) holding one slide per page (pageEls by
+  // page id) and the + page (plusEl); panes (paneEls by reference) and
+  // splits (splitEls by page id and path, their dividers divEls) are kept
+  // so a unit's node keeps its pane. boardw is the board's width beside
+  // the column as the user dragged it, convow the conversation's beside
+  // the board (0: the stylesheet's).
+  var gal = null, lay = null, galEl = null, railEl = null, dotsEl = null, viewEl = null, plusEl = null;
+  var pageEls = {}, paneEls = {}, splitEls = {}, divEls = {}, dotEls = {}, railLast = -Infinity, rg = null, railMoved = false, resizeBound = false;
+  var boardw = 0, convow = 0;
   var toolbar = null, overviewOn = false;
   var stateFilter = "all", stateUI = null;
   var filterValues = ["all", "asks", "researching", "discussing", "waiting", "implementing", "awaiting-confirmation", "closed", "cards"];
@@ -92,7 +108,7 @@
   }
   function isCard(n) { return !!n && n.nodeType === 1 && n.hasAttribute("data-card"); }
   // The toolbar is infrastructure, not a card, flow peer, or storage record.
-  function fixedNode(n) { return isCard(n) || (!!pins && n === pins) || (!!toolbar && n === toolbar); }
+  function fixedNode(n) { return isCard(n) || (!!toolbar && n === toolbar); }
   function buildToolbar() {
     toolbar = mk("div", "board-toolbar");
     toolbar.setAttribute("role", "toolbar");
@@ -307,10 +323,10 @@
     if (hide) n.setAttribute("data-state-filtered", ""); else n.removeAttribute("data-state-filtered");
   }
   function countTopics() {
-    if (!stateUI || !pins) return;
+    if (!stateUI || !galEl) return;
     var totals = {}, seen = new Set();
     filterValues.forEach(function (v) { totals[v] = 0; });
-    [board, pins].forEach(function (box) {
+    [board, galEl].forEach(function (box) {
       Array.prototype.forEach.call(box.querySelectorAll("section.topic[data-topic]"), function (n) {
         var closed = n.classList.contains("closed"), state = n.getAttribute("data-state"), name = n.getAttribute("data-topic"), asks = n.getAttribute("data-open-asks") === "true";
         filtered(n, stateFilter === "asks" ? !asks : stateFilter === "cards" || stateFilter !== "all" && (closed ? stateFilter !== "closed" : stateFilter === "closed" || stateFilter !== state));
@@ -440,6 +456,17 @@
     return list;
   }
   function pinned() { return units().filter(function (u) { return u.pinned; }).sort(function (a, b) { return a.pinned - b.pinned; }); }
+  // A unit's gallery reference ("c:<id>", "t:<name>"), and a node's.
+  function refOf(u) { return isCard(u.el) || u instanceof Card ? "c:" + u.id : "t:" + u.name; }
+  function nodeRef(n) { return isCard(n) ? "c:" + n.getAttribute("data-card") : "t:" + topicName(n); }
+  // sync writes the gallery's flat pin orders to the units (0: not docked),
+  // so every reader of pinned keeps working, and drops a topic record that
+  // no longer holds anything.
+  function sync() {
+    var o = G.ordinals(gal);
+    cards.forEach(function (c) { c.pinned = o["c:" + c.id] || 0; });
+    Object.keys(topics).forEach(function (k) { var r = topics[k]; r.pinned = o["t:" + k] || 0; tidy(r); });
+  }
   function claimed(n) {
     var name = topicName(n), r = name !== null ? topics[name] : null;
     return !!r && r.el === n && !!(r.pinned || r.at);
@@ -472,7 +499,7 @@
     return rest;
   }
   // split is the placement of base, the board's own nodes less the claimed
-  // topics: the pin list's nodes and the board column's.
+  // topics: the docked nodes, in pin order, and the board column's.
   function split(base) {
     var flow = units().filter(function (u) { return !u.pinned; });
     var out = order(base, flow, topicAt);
@@ -480,14 +507,14 @@
     // preview). This changes placement only, never the persisted open time.
     var leading = flow.filter(function (u) { return opt.leading && opt.leading(u); }).map(function (u) { return u.el; });
     out = out.filter(function (n) { return leading.indexOf(n) < 0; });
-    return { pins: pinned().map(function (u) { return u.el; }), board: [toolbar].concat(leading, colOn && !overviewOn ? out : [pins].concat(out)) };
+    return { pins: pinned().map(function (u) { return u.el; }), board: [toolbar].concat(leading, out) };
   }
   function weave(base) {
     var rest = claim(base);
     relayout();
     return split(rest);
   }
-  // seat puts a topic that leaves the pin list without a place of its own
+  // seat puts a topic that leaves the gallery without a place of its own
   // back among the board's nodes: an open one above the first open topic
   // older than it, a closed one at the head of the closed section (the next
   // board update puts it where the board keeps it).
@@ -502,6 +529,15 @@
     }
     base.splice(i, 0, n);
   }
+  // put moves n before ref in el: with Element.moveBefore where the browser
+  // has it and both stand on the page (a frame keeps its document), else
+  // with insertBefore.
+  function put(el, n, ref) {
+    if (el.moveBefore && (n.parentNode === el || (n.isConnected && el.isConnected))) {
+      try { el.moveBefore(n, ref); return; } catch (e) { /* insertBefore below */ }
+    }
+    el.insertBefore(n, ref);
+  }
   // arrange puts the cards and topics in their places. moved is the one
   // unit whose place changed: it alone moves, with its state kept where the
   // browser can keep it.
@@ -511,47 +547,673 @@
     if (moved && moved.el && !isCard(moved.el)) leaveSlot(moved.el);
     var base = Array.prototype.filter.call(board.childNodes, function (n) { return !fixedNode(n) && !claimed(n); });
     if (moved && moved.el && !isCard(moved.el) && !claimed(moved.el) && moved.el.parentNode !== board) seat(base, moved.el);
-    var p = split(base), box = moved && moved.el ? (p.pins.indexOf(moved.el) >= 0 ? pins : board) : null;
-    if (box && moved.el.parentNode === box) {
-      var want = box === pins ? p.pins : p.board, ref = want[want.indexOf(moved.el) + 1] || null;
-      if (moved.el.nextSibling !== ref) {
-        try { if (box.moveBefore) box.moveBefore(moved.el, ref); else box.insertBefore(moved.el, ref); }
-        catch (e) { box.insertBefore(moved.el, ref); }
-      }
+    var p = split(base), at = moved && moved.el && moved.el.parentNode === board ? p.board.indexOf(moved.el) : -1;
+    if (at >= 0) {
+      var ref = p.board[at + 1] || null;
+      if (moved.el.nextSibling !== ref) put(board, moved.el, ref);
     }
-    place(p, function (n) { return n === pins || n === toolbar; });
+    place(p, function (n) { return n === toolbar; });
   }
-  // place settles the pin list, then the board (fixed: what the board's
-  // settle never moves): a node pinned from the board moves into the list
-  // before the board lets it go, and one unpinned moves out of the list
-  // into the board. The pin list itself moves to the pinned column first
-  // when the page shows one, so the board never lets it go either.
+  // place puts the docked nodes into their panes, then settles the board
+  // (fixed: what the board's settle never moves): a node docked from the
+  // board moves into its pane before the board lets it go, and one undocked
+  // moves out of its pane into the board. What the gallery no longer holds
+  // goes last, so nothing the board takes is detached on its way.
   function place(p, fixed) {
-    if (colOn && !overviewOn && pins.parentNode !== col) {
-      try { if (col.moveBefore && pins.isConnected) col.moveBefore(pins, null); else col.appendChild(pins); }
-      catch (e) { col.appendChild(pins); }
-    }
-    settle(pins, p.pins, function () { return false; }, new Set(p.board));
+    var built = buildGallery(p.pins);
     settle(board, p.board, fixed, new Set(p.pins));
+    sweepGallery(built);
     p.pins.concat(p.board).forEach(function (n) { var name = topicName(n); if (name !== null && topics[name]) topics[name].el = n; });
+    paintGallery();
     decorate();
   }
-  // relayout asks the page whether it shows the pinned column for the pins
-  // there are, and tells it when that changes.
+
+  // --- the gallery ----------------------------------------------------------------
+  // buildGallery makes the gallery's pages, splits and panes stand for its
+  // model, each docked node (nodes) in its pane, and returns what each of
+  // those elements holds (sweepGallery drops the rest). A page, a split and
+  // a pane keep their elements across changes, so a node stays put unless
+  // its own place changed; the pages' DOM order never changes either (the
+  // rail and the slides' transforms order them), so a page switch moves
+  // nothing. A docked topic still being fetched has an empty pane. Each
+  // element is filled after it stands in its parent (top down), so a pane
+  // or a unit that moves goes from one place on the page to another, with
+  // Element.moveBefore where the browser has it (its frames keep their
+  // documents), never through a detached element: a split that takes a
+  // pane, a collapse that lifts one, a move across pages.
+  function buildGallery(nodes) {
+    var by = {}, want = new Map(), used = { panes: {}, splits: {}, pages: {} };
+    nodes.forEach(function (n) { by[nodeRef(n)] = n; });
+    function hold(el, list) {
+      want.set(el, list);
+      var cur = el.firstChild;
+      list.forEach(function (n) {
+        if (n === cur) { cur = cur.nextSibling; return; }
+        put(el, n, cur);
+      });
+    }
+    // tree gives the element standing for node n (path from its page's
+    // root) and fill, which puts its children in it once it stands.
+    function tree(pid, n, path) {
+      if (G.isSplit(n)) {
+        var key = pid + "/" + path, s = splitEls[key] || (splitEls[key] = mk("div")), v = divEls[key] || (divEls[key] = divider());
+        s.className = "gal-split " + n.axis;
+        s.setAttribute("data-path", path);
+        used.splits[key] = true;
+        var a = tree(pid, n.a, path + "a"), b = tree(pid, n.b, path + "b");
+        sizeSplit(s, a.el, v, b.el, n.axis, n.ratio);
+        return { el: s, fill: function () { hold(s, [a.el, v, b.el]); a.fill(); b.fill(); } };
+      }
+      var ref = G.refOf(n), p = paneEls[ref];
+      if (!p) {
+        p = paneEls[ref] = mk("div", "gal-pane");
+        p.setAttribute("data-ref", ref);
+      }
+      used.panes[ref] = true;
+      return { el: p, fill: function () { hold(p, by[ref] ? [by[ref]] : []); } };
+    }
+    gal.pages.forEach(function (pg) {
+      var el = pageEls[pg.id];
+      if (!el) {
+        el = pageEls[pg.id] = mk("div", "gal-page");
+        el.setAttribute("data-page", pg.id);
+        viewEl.insertBefore(el, plusEl);
+      }
+      used.pages[pg.id] = true;
+      var root = tree(pg.id, pg.root, "");
+      root.el.style.flex = "";
+      hold(el, [root.el]);
+      root.fill();
+    });
+    return { want: want, used: used };
+  }
+  // sizeSplit gives a split's two children their shares (ratio is a's)
+  // and its divider the axis and value it reports.
+  function sizeSplit(s, a, v, b, axis, ratio) {
+    a.style.flex = ratio + " 1 0px";
+    b.style.flex = (1 - ratio) + " 1 0px";
+    v.setAttribute("aria-orientation", axis === "row" ? "vertical" : "horizontal");
+    v.setAttribute("aria-valuenow", String(Math.round(ratio * 100)));
+  }
+  // divider makes a split's divider: dragged (pointer capture), it sets the
+  // split's ratio (WsGallery.setRatio clamps it) as the pointer moves and
+  // saves on release; a double click goes back to half and half; focused,
+  // the arrow keys along its axis nudge it by RATIO_STEP.
+  var RATIO_STEP = 0.05;
+  function divider() {
+    var v = mk("div", "gal-div"), from = null;
+    v.setAttribute("role", "separator");
+    v.setAttribute("aria-valuemin", String(Math.round(G.C.RATIO_MIN * 100)));
+    v.setAttribute("aria-valuemax", String(Math.round(G.C.RATIO_MAX * 100)));
+    v.setAttribute("aria-label", wsT("js.pins.width"));
+    v.title = wsT("js.pins.width");
+    v.tabIndex = 0;
+    // at is the split v divides: its page id, path and model node.
+    function at() {
+      var s = v.parentNode, pg = s && s.closest && s.closest(".gal-page[data-page]");
+      if (!pg) return null;
+      var id = pg.getAttribute("data-page"), path = s.getAttribute("data-path") || "", i = G.pageIndex(gal, id);
+      var n = i < 0 ? null : G.nodeAt(gal.pages[i].root, path);
+      return G.isSplit(n) ? { id: id, path: path, node: n, s: s } : null;
+    }
+    function set(t, r) {
+      gal = G.setRatio(gal, t.id, t.path, Math.round(r * 1000) / 1000);
+      var n = G.nodeAt(gal.pages[G.pageIndex(gal, t.id)].root, t.path);
+      sizeSplit(t.s, t.s.children[0], v, t.s.children[2], n.axis, n.ratio);
+    }
+    v.addEventListener("pointerdown", function (e) {
+      if (e.button !== undefined && e.button !== 0) return;
+      var t = at();
+      if (!t) return;
+      var r = t.s.getBoundingClientRect(), w = v.getBoundingClientRect();
+      from = { t: t, row: t.node.axis === "row", r: r, thick: t.node.axis === "row" ? w.width : w.height };
+      v.classList.add("drag");
+      try { v.setPointerCapture(e.pointerId); } catch (x) { /* no capture: the moves still land */ }
+      e.preventDefault();
+    });
+    v.addEventListener("pointermove", function (e) {
+      if (!from) return;
+      var f = from, span = (f.row ? f.r.width : f.r.height) - f.thick;
+      if (span <= 0) return;
+      set(f.t, ((f.row ? e.clientX - f.r.left : e.clientY - f.r.top) - f.thick / 2) / span);
+    });
+    function end() { if (!from) return; from = null; v.classList.remove("drag"); persist(); }
+    v.addEventListener("pointerup", end);
+    v.addEventListener("pointercancel", end);
+    v.addEventListener("dblclick", function () { var t = at(); if (t) { set(t, 0.5); persist(); } });
+    v.addEventListener("keydown", function (e) {
+      var t = at();
+      if (!t) return;
+      var row = t.node.axis === "row", d = e.key === (row ? "ArrowLeft" : "ArrowUp") ? -1 : e.key === (row ? "ArrowRight" : "ArrowDown") ? 1 : 0;
+      if (!d) return;
+      e.preventDefault();
+      set(t, t.node.ratio + d * RATIO_STEP);
+      persist();
+    });
+    return v;
+  }
+  function sweepGallery(b) {
+    b.want.forEach(function (list, el) {
+      Array.prototype.slice.call(el.childNodes).forEach(function (c) { if (list.indexOf(c) < 0) el.removeChild(c); });
+    });
+    [[paneEls, b.used.panes], [splitEls, b.used.splits], [divEls, b.used.splits], [pageEls, b.used.pages]].forEach(function (m) {
+      Object.keys(m[0]).forEach(function (k) {
+        if (m[1][k]) return;
+        var el = m[0][k];
+        if (el.parentNode) el.parentNode.removeChild(el);
+        delete m[0][k];
+      });
+    });
+  }
+  function calm() { return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches); }
+  // refName is what a rail dot calls a docked unit.
+  function refName(ref) {
+    if (ref.charAt(0) === "t") return ref.slice(2);
+    var c = cards.filter(function (x) { return "c:" + x.id === ref; })[0];
+    return c ? c.name.textContent || c.kind : ref.slice(2);
+  }
+  function pageIcon(ref) {
+    if (ref.slice(0, 2) === "t:") {
+      var topic = topics[ref.slice(2)], el = topic && topic.el;
+      var state = el && !el.classList.contains("closed") && el.getAttribute("data-state");
+      var states = { implementing: "impl", researching: "research", discussing: "discuss", waiting: "wait", "awaiting-confirmation": "confirm" };
+      var glyph = states[state];
+      return { href: glyph ? "#i-st-" + glyph : "#i-chat", state: glyph ? "d-gal-" + glyph : "plain" };
+    }
+    var c = cards.filter(function (x) { return "c:" + x.id === ref; })[0];
+    var use = c && c.icon && c.icon.querySelector("use"), href = use && use.getAttribute("href");
+    if (!href || !/^#l-[a-z0-9-]+$/.test(href)) {
+      var kinds = { explorer: "folder-open", terminal: "square-terminal", preview: "file", web: "globe" };
+      href = "#l-" + (c && kinds[c.kind] || "file");
+    }
+    return { href: href, state: "card" };
+  }
+  function pageCapsule(b, refs) {
+    b.textContent = "";
+    b.setAttribute("data-count", String(refs.length));
+    refs.slice(0, 5).forEach(function (ref) {
+      var icon = pageIcon(ref), svg = doc.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svg.setAttribute("class", "gal-dot-icon " + icon.state);
+      svg.setAttribute("aria-hidden", "true");
+      var use = doc.createElementNS("http://www.w3.org/2000/svg", "use");
+      use.setAttribute("href", icon.href);
+      svg.appendChild(use);
+      b.appendChild(svg);
+    });
+    if (refs.length > 5) b.appendChild(mk("span", "gal-dot-more", "+" + (refs.length - 5)));
+  }
+  // paintGallery draws the rail (the narrow view's home dot, a capsule per
+  // page with up to five item icons, the + dot; real buttons kept across repaints)
+  // and shows the current page. dir (+1 down, -1 up) animates the flip.
+  function paintGallery(dir) {
+    if (!galEl) return;
+    var narrow = !!(lay && lay.narrow), n = gal.pages.length, pos = G.position(gal, narrow), seen = {};
+    var keys = (narrow ? ["main"] : []).concat(gal.pages.map(function (pg) { return pg.id; }), ["+"]);
+    keys.forEach(function (k, i) {
+      var p = narrow ? i - 1 : i, b = dotEls[k], label;
+      if (!b) {
+        b = dotEls[k] = mk("button", "gal-dot");
+        b.type = "button";
+      }
+      seen[k] = true;
+      b.className = "gal-dot" + (k === "main" ? " main" : k === G.PLUS ? " empty" : " page") + (p === pos ? " active" : "");
+      b.setAttribute("data-pos", String(p));
+      if (k === "main") { b.removeAttribute("data-count"); b.textContent = "⌂"; label = wsT("tab.board"); }
+      else if (k === G.PLUS) { b.removeAttribute("data-count"); b.textContent = "+"; label = wsT("js.pins.drop"); }
+      else {
+        var refs = G.leaves(gal.pages[p].root);
+        pageCapsule(b, refs);
+        label = (p + 1) + ": " + refs.map(refName).join(" + ");
+      }
+      b.title = label;
+      b.setAttribute("aria-label", label);
+      if (p === pos) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current");
+      if (dotsEl.children[i] !== b) dotsEl.insertBefore(b, dotsEl.children[i] || null);
+    });
+    Object.keys(dotEls).forEach(function (k) {
+      if (seen[k]) return;
+      if (dotEls[k].parentNode) dotEls[k].parentNode.removeChild(dotEls[k]);
+      delete dotEls[k];
+    });
+    var rail = !!(lay && lay.rail), empty = !!(lay && lay.empty), shown = rail || empty;
+    galEl.hidden = !shown;
+    railEl.hidden = !rail;
+    galEl.setAttribute("data-pos", String(pos));
+    galEl.setAttribute("data-pages", String(n));
+    if (narrow) galEl.setAttribute("data-narrow", ""); else galEl.removeAttribute("data-narrow");
+    gal.pages.forEach(function (pg, i) { slide(pageEls[pg.id], i - pos, dir); });
+    slide(plusEl, n - pos, dir);
+    var activeDot = dotEls[dotKey(pos)];
+    if (activeDot && dotsEl.scrollHeight > dotsEl.clientHeight) {
+      var listBox = dotsEl.getBoundingClientRect(), dotBox = activeDot.getBoundingClientRect();
+      if (dotBox.top < listBox.top) dotsEl.scrollTop += dotBox.top - listBox.top;
+      else if (dotBox.bottom > listBox.bottom) dotsEl.scrollTop += dotBox.bottom - listBox.bottom;
+    }
+    away(rail && narrow && pos >= 0);
+    homeWheel(rail && narrow && n > 0);
+  }
+  // away stands the narrow view's Main Board (Page 0) off the view while a
+  // docked page shows over it, as slide does an inactive page: the root's
+  // data-gal-away translates the board column's content out of the
+  // column's clip (the stylesheet), so intersection observers see the
+  // board out of view (viewed topics, terminals) while its DOM and scroll
+  // offset stay as they were; it takes no focus (inert).
+  function away(on) {
+    var r = doc.documentElement;
+    if (on === r.hasAttribute("data-gal-away")) return;
+    if (on) r.setAttribute("data-gal-away", ""); else r.removeAttribute("data-gal-away");
+    if (board) board.inert = on;
+  }
+  // slide stands a page off positions from the one shown: an inactive page
+  // stays mounted, translated out of the clipped viewport (the stylesheet's
+  // --gal-off), so intersection observers see it out of view and its frames
+  // keep their documents; it takes no focus (inert). The page that comes
+  // into view jumps there, or settles from the flip's overshoot.
+  function slide(el, off, dir) {
+    if (!el) return;
+    if (off) {
+      el.removeAttribute("data-active");
+      el.style.setProperty("--gal-off", String(off));
+      el.setAttribute("aria-hidden", "true");
+      el.inert = true;
+      return;
+    }
+    var was = el.hasAttribute("data-active");
+    el.setAttribute("data-active", "");
+    el.style.removeProperty("--gal-off");
+    el.removeAttribute("aria-hidden");
+    el.inert = false;
+    if (was) return;
+    el.style.transition = "none";
+    el.style.transform = dir && !calm() ? "translateY(" + dir * G.C.OVERSHOOT_PX + "px)" : "";
+    void el.offsetWidth;
+    el.style.transition = "";
+    el.style.transform = "";
+  }
+  // galSet takes a new model: the units' pin orders follow it, and moved
+  // (the unit whose place changed, if any) moves; the record is saved. A
+  // card whose docking changed tells its kind (a preview's transient state
+  // ends).
+  function galSet(g, moved) {
+    var was = cards.map(function (c) { return !!c.pinned; });
+    gal = g;
+    var list = cards.slice();
+    sync();
+    list.forEach(function (c) { c.paint(); });
+    arrange(moved || null);
+    persist();
+    list.forEach(function (c, i) { if (was[i] !== !!c.pinned && c.k.pinned && cards.indexOf(c) >= 0) c.k.pinned(c); });
+  }
+  // show switches the gallery to position pos (WsGallery.position: -1 the
+  // narrow view's Main Board, then the pages, then +), animated by dir.
+  function show(pos, dir) {
+    var narrow = !!(lay && lay.narrow), cur = G.position(gal, narrow), g = G.activate(gal, pos, narrow);
+    if (g === gal) return false;
+    gal = g;
+    if (pullEl) { pullOff(); gate.clear(); }
+    paintGallery(dir === undefined ? (pos > cur ? 1 : -1) : dir);
+    persist();
+    return true;
+  }
+  function step(d) { show(G.position(gal, !!(lay && lay.narrow)) + d, d); }
+  // activate shows the page a node stands on (in the narrow view a node on
+  // the Main Board shows Page 0) and tells whether it switched; a caller
+  // scrolls the node into view after it.
+  function activate(node) {
+    if (!node || !board || !galEl || !node.closest) return false;
+    var narrow = !!(lay && lay.narrow), pane = node.closest(".gal-pane[data-ref]"), want;
+    if (pane && galEl.contains(pane)) {
+      want = G.pageOf(gal, pane.getAttribute("data-ref"));
+      if (want < 0) return false;
+    } else if (narrow && board.contains(node)) want = -1;
+    else return false;
+    return want !== G.position(gal, narrow) && show(want, 0);
+  }
+  // buildGalleryEl builds the gallery's element in host: the width handle,
+  // the rail and the viewport with its + page; the rail navigates (a dot's
+  // click or Enter, a wheel tick, the empty rail above or below the dots,
+  // a vertical press-drag) and a dragged page dot reorders the pages.
+  function buildGalleryEl(host) {
+    galEl = mk("aside", "bgal");
+    galEl.id = "bgal";
+    galEl.setAttribute("aria-label", wsT("js.pins.title"));
+    galEl.hidden = true;
+    railEl = mk("div", "gal-rail");
+    railEl.setAttribute("role", "navigation");
+    railEl.setAttribute("aria-label", wsT("js.pins.title"));
+    var up = mk("div", "gal-rzone up", "▲"), down = mk("div", "gal-rzone down", "▼");
+    [up, down].forEach(function (z) { z.setAttribute("aria-hidden", "true"); });
+    dotsEl = mk("div", "gal-dots");
+    [up, dotsEl, down].forEach(function (n) { railEl.appendChild(n); });
+    viewEl = mk("div", "gal-viewport");
+    plusEl = mk("div", "gal-page gal-plus", wsT("js.pins.drop"));
+    plusEl.setAttribute("data-page", G.PLUS);
+    viewEl.appendChild(plusEl);
+    galEl.appendChild(railEl);
+    galEl.appendChild(viewEl);
+    edgeHandle();
+    host.appendChild(galEl);
+    dotsEl.addEventListener("click", function (e) {
+      var b = e.target.closest && e.target.closest(".gal-dot");
+      if (b && !railMoved) show(+b.getAttribute("data-pos"));
+    });
+    up.addEventListener("click", function () { if (!railMoved) step(-1); });
+    down.addEventListener("click", function () { if (!railMoved) step(1); });
+    railEl.addEventListener("wheel", function (e) {
+      if (e.preventDefault) e.preventDefault();
+      var now = Date.now(), dy = +e.deltaY || 0;
+      if (!dy || !G.railStep(railLast, now)) return;
+      railLast = now;
+      step(dy > 0 ? 1 : -1);
+    }, { passive: false });
+    viewEl.addEventListener("wheel", function (e) { gateWheel(e, false); }, { passive: false });
+    railEl.addEventListener("pointerdown", function (e) {
+      if (rg || dg || (e.button !== undefined && e.button !== 0)) return;
+      var b = e.target.closest && e.target.closest(".gal-dot"), p = b ? +b.getAttribute("data-pos") : NaN;
+      rg = { id: e.pointerId, x0: e.clientX, y0: e.clientY, from: G.position(gal, !!(lay && lay.narrow)), on: false,
+        dot: b && p >= 0 && p < gal.pages.length ? p : null, onDot: !!b, target: null };
+    });
+  }
+  // The rail's press: past SLOP px a press on a page dot drags it (dropped
+  // on another page's dot, the page moves there), a press elsewhere on the
+  // rail pans (RAIL_PAN px per page); either swallows the click it ends in.
+  var RAIL_PAN = 36;
+  function railMove(e) {
+    var r = rg;
+    if (!r || e.pointerId !== r.id) return;
+    if (!r.on) {
+      if (Math.abs(e.clientX - r.x0) <= SLOP && Math.abs(e.clientY - r.y0) <= SLOP) return;
+      if (r.onDot && r.dot === null) { rg = null; return; }
+      r.on = true;
+      railMoved = true;
+      if (r.dot !== null) galEl.setAttribute("data-dotdrag", "");
+    }
+    if (e.preventDefault) e.preventDefault();
+    if (r.dot !== null) {
+      var t = dotAt(e.clientX, e.clientY);
+      r.target = t && t.pos >= 0 && t.pos < gal.pages.length && t.pos !== r.dot ? t : null;
+      markDrop(r.target && r.target.el);
+      return;
+    }
+    var n = gal.pages.length, narrow = !!(lay && lay.narrow);
+    var next = Math.max(narrow ? -1 : 0, Math.min(n, r.from + Math.round((e.clientY - r.y0) / RAIL_PAN)));
+    if (next !== G.position(gal, narrow)) show(next);
+  }
+  function railEnd(e) {
+    var r = rg;
+    if (!r || (e && e.pointerId !== r.id)) return;
+    rg = null;
+    if (!r.on) return;
+    galEl.removeAttribute("data-dotdrag");
+    markDrop(null);
+    setTimeout(function () { railMoved = false; }, 0);
+    if (e && e.type === "pointerup" && r.dot !== null && r.target) {
+      var id = gal.pages[r.dot].id, g = G.movePage(gal, r.dot, r.target.pos);
+      galSet(G.activate(g, G.pageIndex(g, id), !!(lay && lay.narrow)), null);
+    }
+  }
+  // dotAt is the rail dot at (x, y): {pos, el}, or null.
+  function dotAt(x, y) {
+    if (!galEl || galEl.hidden || !railEl || railEl.hidden) return null;
+    var hit = null;
+    Array.prototype.some.call(dotsEl.children, function (b) {
+      if (!inside(rectOf(b), x, y)) return false;
+      hit = { pos: +b.getAttribute("data-pos"), el: b };
+      return true;
+    });
+    return hit;
+  }
+  // markDrop lights the one drop target a drag would land on.
+  var lit = null;
+  function markDrop(el) {
+    if (lit === el) return;
+    if (lit) lit.classList.remove("drop");
+    lit = el || null;
+    if (lit) lit.classList.add("drop");
+  }
+  function clock() { return window.performance && window.performance.now ? window.performance.now() : Date.now(); }
+  // dotKey is the key of the rail dot (dotEls) for position p.
+  function dotKey(p) { var n = gal.pages.length; return p < 0 ? "main" : p >= n ? G.PLUS : gal.pages[p].id; }
+
+  // --- spring-loaded rail dots -----------------------------------------------
+  // While a drag runs, a rail dot hovered SPRING_MS (WsGallery.Hover) shows
+  // its page, so the drag can go on to a pane's zone or into +; the dot
+  // carries .spring meanwhile. A drop before then keeps the dot's own drop
+  // (+ docks on a new page, a page's dot appends, ⌂ undocks). The dot of
+  // the page shown never springs.
+  var hover = new G.Hover(), springT = 0;
+  function spring(hit) {
+    var el = hit && hit.el.classList.contains("gal-dot") && hit.pos !== G.position(gal, !!(lay && lay.narrow)) ? hit.el : null;
+    if (el === hover.target) return;
+    unspring();
+    if (!el) return;
+    hover.over(el, clock());
+    el.classList.add("spring");
+    springT = setTimeout(sprung, G.C.SPRING_MS);
+  }
+  function unspring() {
+    clearTimeout(springT);
+    springT = 0;
+    if (hover.target) hover.target.classList.remove("spring");
+    hover.clear();
+  }
+  // sprung fires the hover: the page shows, and the drop under the
+  // pointer is read again (over otherwise runs on a pointer move only).
+  function sprung() {
+    springT = 0;
+    var el = hover.target, now = clock();
+    if (!el) return;
+    if (!hover.fire(now)) { springT = setTimeout(sprung, Math.max(1, hover.since + hover.ms - now)); return; }
+    el.classList.remove("spring");
+    if (!dg || !dg.on) return;
+    show(+el.getAttribute("data-pos"));
+    over(dg.x, dg.y);
+  }
+
+  // --- the boundary bounce-snap gate -----------------------------------------
+  // A wheel event over the page shown (or, in the narrow view, over the
+  // Main Board on Page 0) runs through WsGallery.Gate: past the scroll
+  // limit of the pane under the pointer it charges tension toward the
+  // adjacent page (a rubber band on the page, a pill with the target and
+  // its percentage, the target's dot marked), flips there at 100%, and
+  // springs back when idle; momentum and an edge with no page past it get
+  // the damped micro-bounce. One timer asks the gate to settle (gate.due).
+  // Wheel only: touch scrolling never charges it.
+  // gateIn is the one input object every event refills (no allocation per
+  // event); nb the neighbors of the model nbOf in the view nbNarrow.
+  var gate = new G.Gate(), gateT = 0, pullEl = null, pullDot = null, pills = null, homeEl = null, homeScr = null;
+  var gateIn = { dy: 0, now: 0, canUp: false, canDown: false, prev: null, next: null }, nb = null, nbOf = null, nbNarrow = null;
+  // OWN is what takes its own wheel events: a terminal, a frame, a canvas
+  // or media, a maximized sheet, and the bodies of terminal and web cards
+  // (a preview card's body is an ordinary scroller; its frames and media
+  // are OWN themselves).
+  var OWN = '.xterm, .tm-host, iframe, canvas, video, embed, object, [data-max], [data-max] *, .bcard:is([data-kind="terminal"], [data-kind="web"]) > .bc-in > .bc-body';
+  var PANE_BODY = ':scope > section.topic > .gal-pbody, :scope > .bcard > .bc-in > .bc-body';
+  function reach(s, dy) {
+    return dy > 0 ? s.scrollTop + s.clientHeight < s.scrollHeight - G.C.EPS : s.scrollTop > G.C.EPS;
+  }
+  // canScroll tells whether a wheel by dy over t still scrolls natively:
+  // the scrollers from t up to bound (both included; the pane, else the
+  // page or the view, or on Page 0 the board's scroller) are asked
+  // nearest first, as the browser chains the scroll, and a scroller at
+  // its limit whose overscroll behavior contains it ends the chain. Only
+  // an element that overflows pays for its computed style. With no
+  // scroller on the way, fall (the pane's body, the board's scroller)
+  // answers.
+  function canScroll(t, bound, dy, fall) {
+    var any = false, top = doc.scrollingElement;
+    for (var n = t; n && n.nodeType === 1; n = n.parentNode) {
+      if (n.scrollHeight - n.clientHeight > G.C.EPS) {
+        var cs = n === top ? null : getComputedStyle(n);
+        if (!cs || /auto|scroll/.test(cs.overflowY)) {
+          any = true;
+          if (reach(n, dy)) return true;
+          if (cs && /contain|none/.test(cs.overscrollBehaviorY)) return false;
+        }
+      }
+      if (n === bound || n === top) break;
+    }
+    return !any && !!fall && reach(fall, dy);
+  }
+  // gateWheel runs wheel event e through the gate; home: it comes from the
+  // narrow view's Main Board. The scroller is the nearest one under the
+  // pointer that still scrolls that way, within its pane or, on Page 0,
+  // within the board's scroller (canScroll). An event that a widget took
+  // (defaultPrevented) or that stands in one (OWN) never charges, nor
+  // does a pinch (ctrlKey) or anything while the overview runs.
+  function gateWheel(e, home) {
+    if (e.defaultPrevented || e.ctrlKey || overviewOn || !lay || !e.target || !e.target.closest) return;
+    var narrow = !!lay.narrow, pos = G.position(gal, narrow);
+    if (home ? pos >= 0 || galEl.contains(e.target) : pos < 0) return;
+    var dy = +e.deltaY || 0;
+    if (e.deltaMode === 1) dy *= 40; else if (e.deltaMode === 2) dy *= 800;
+    if (e.target.closest(OWN)) return;
+    var bound = home ? homeScr : e.target.closest(".gal-pane, .gal-page") || viewEl, fall = home ? homeScr : null;
+    if (!home && bound && bound.classList.contains("gal-pane")) fall = bound.querySelector(PANE_BODY);
+    var can = canScroll(e.target, bound, dy, fall), w = gateIn;
+    // The model is replaced, never changed, on every change: its
+    // neighbors are read once per model and view.
+    if (nbOf !== gal || nbNarrow !== narrow) { nb = G.neighbors(gal, pos, narrow); nbOf = gal; nbNarrow = narrow; }
+    w.dy = dy;
+    w.now = clock();
+    w.canUp = dy < 0 && can;
+    w.canDown = dy > 0 && can;
+    w.prev = nb.prev;
+    w.next = nb.next;
+    var r = gate.wheel(w);
+    if (r.kind === "none") return;
+    if (r.kind === "pass") { if (r.reset) pullOff(); gateArm(); return; }
+    e.preventDefault();
+    var el = home ? board : pos >= gal.pages.length ? plusEl : pageEls[gal.pages[pos].id], to = pos + (r.dir || 0);
+    if (r.kind === "reset") pullOff();
+    else if (r.kind === "micro") pullShow(el, r.dir, r.shift, 0, "damped", wsT(r.edge ? "js.pins.edge" : "js.pins.wait"), null);
+    else if (r.kind === "pull") pullShow(el, r.dir, r.shift, r.pct, r.ready ? "ready" : "", pullName(to) + " (" + Math.round(r.pct * 100) + "%)", to);
+    else if (r.kind === "flip") { pullOff(); show(to, r.dir); }
+    gateArm();
+  }
+  function pullName(p) {
+    var b = dotEls[dotKey(p)];
+    return p >= gal.pages.length ? G.PLUS : b ? b.title : "";
+  }
+  function gateArm() {
+    clearTimeout(gateT);
+    gateT = 0;
+    var d = gate.due();
+    if (d !== null) gateT = setTimeout(gateTick, Math.max(0, d - clock()) + 1);
+  }
+  function gateTick() {
+    gateT = 0;
+    if (gate.tick(clock())) pullOff(); else gateArm();
+  }
+  function pillEls() {
+    if (!pills) pills = [-1, 1].map(function (dir) {
+      var p = mk("div", "gal-pullpill " + (dir > 0 ? "bottom" : "top")), txt = mk("div", "gal-pulltxt"), track = mk("div", "gal-pulltrack"), fill = mk("div", "gal-pullfill");
+      p.setAttribute("aria-hidden", "true");
+      track.appendChild(fill);
+      p.appendChild(txt);
+      p.appendChild(track);
+      return { el: p, txt: txt, fill: fill };
+    });
+    pills.forEach(function (p) { if (p.el.parentNode !== viewEl) viewEl.appendChild(p.el); });
+    return pills;
+  }
+  // pullShow draws a pull or a micro-bounce on el (the page shown, or the
+  // Main Board): el shifts shift px against dir (its translate, apart
+  // from the slides' transform; none for reduced motion), the pill on
+  // dir's side reads text over pct, state "damped" or "ready" (else
+  // none), and the dot of the page at target (null: none) is marked.
+  function pullShow(el, dir, shift, pct, state, text, target) {
+    if (pullEl && pullEl !== el) pullOff();
+    pullEl = el;
+    el.setAttribute("data-gal-pull", "");
+    el.style.translate = calm() ? "" : "0 " + (-dir * shift).toFixed(1) + "px";
+    var ps = pills || pillEls(), p = ps[dir > 0 ? 1 : 0], q = ps[dir > 0 ? 0 : 1], t = (dir > 0 ? "↓ " : "↑ ") + text, f = Math.round(pct * 100) + "%";
+    q.el.classList.remove("lit", "ready", "damped");
+    p.el.classList.add("lit");
+    p.el.classList.toggle("damped", state === "damped");
+    p.el.classList.toggle("ready", state === "ready");
+    if (p.txt.textContent !== t) p.txt.textContent = t;
+    if (p.fill.style.width !== f) p.fill.style.width = f;
+    var d = target === null ? null : dotEls[dotKey(target)] || null;
+    if (pullDot === d) return;
+    if (pullDot) pullDot.classList.remove("pull-target");
+    pullDot = d;
+    if (d) d.classList.add("pull-target");
+  }
+  // pullOff springs a pull or a micro-bounce back (the stylesheet's
+  // transition) and hides the pills and the dot mark.
+  function pullOff() {
+    if (pullEl) {
+      pullEl.removeAttribute("data-gal-pull");
+      pullEl.style.translate = "";
+      pullEl = null;
+    }
+    if (pills) pills.forEach(function (p) { p.el.classList.remove("lit", "ready", "damped"); });
+    if (pullDot) pullDot.classList.remove("pull-target");
+    pullDot = null;
+  }
+  // homeWheel listens for the gate on the board's column while the narrow
+  // view has a docked page (with none the gate is inert there, and the
+  // wide view's board never pages), so the board's own scrolling carries
+  // no blocking wheel listener otherwise.
+  function onHomeWheel(e) { gateWheel(e, true); }
+  function homeWheel(on) {
+    var col = on && board ? doc.getElementById("bcol") || board.parentNode : null;
+    if (col) homeScr = scroller(board) || doc.scrollingElement;
+    if (col === homeEl) return;
+    if (homeEl) homeEl.removeEventListener("wheel", onHomeWheel);
+    homeEl = col;
+    if (col) col.addEventListener("wheel", onHomeWheel, { passive: false });
+  }
+  // canFitFourCol activates the 4-column layout (rail + stage + gallery
+  // column) iff !tabs, viewport >= WIDE, and spare right width >= board width.
+  function canFitFourCol(vw, tabs) {
+    if (tabs || !(vw >= G.C.WIDE)) return false;
+    var stageW = vw - 32 - 356, gap = 16;
+    var split = !!(opt && (opt.split || (board && board.closest && board.closest(".dgrid.live, .dgrid.history"))));
+    var worktree = !!(board && board.closest && board.closest(".dgrid.worktree"));
+    var gridW, boardW;
+    if (worktree) {
+      gridW = boardw || 1292;
+      boardW = (gridW - gap) * 7 / 12;
+    } else if (!split) {
+      boardW = boardw || 900;
+      gridW = boardW;
+    } else if (boardw) {
+      boardW = boardw;
+      gridW = (convow || (boardw * 5 / 7)) + gap + boardW;
+    } else {
+      gridW = 1292;
+      boardW = convow ? (gridW - gap - Math.max(CONVW_MIN, Math.min(convow, gridW - gap - SPLITB_MIN))) : ((gridW - gap) * 7 / 12);
+    }
+    return stageW - gridW - gap >= boardW;
+  }
+  // relayout asks the page what it shows (opt.mode: its width and whether
+  // the layout menu shows one column at a time), maps that to the
+  // gallery's shape (WsGallery.layout, plus pages and dragging) and tells
+  // the page when it changes (opt.layout).
   function relayout() {
-    var n = pinned().length, on = !!(col && opt && opt.shows && opt.shows(n));
-    if (on === colOn) return;
-    colOn = on;
-    if (opt.layout) opt.layout(on);
+    if (!opt || !galEl) return;
+    var m = opt.mode ? opt.mode() : null, vw = m ? +m.width || 0 : 0, tabs = !!(m && m.tabs);
+    var n = gal.pages.length, drag = !!(dg && dg.on);
+    var s = G.layout({ width: vw, tabs: tabs, fourCol: canFitFourCol(vw, tabs), pages: n, dragging: drag });
+    s.pages = n;
+    s.dragging = drag;
+    if (lay && lay.narrow === s.narrow && lay.column === s.column && lay.overlay === s.overlay && lay.rail === s.rail && !lay.empty === !s.empty && !lay.pages === !n && lay.dragging === drag) return;
+    lay = s;
+    paintGallery();
+    if (opt.layout) opt.layout(s);
   }
   // decorate gives every topic on the board a pin button in its title bar,
-  // before the note pen, pressed while the topic is pinned, and the
-  // maximize button and its back button right of the pin. A board update
-  // brings a changed topic's bar anew (a new section, or the old one with
-  // the new bar's content), so this runs after every settle, and draws a
-  // large topic or panel large again on the node that now stands for it.
+  // before the note pen, pressed while the topic is docked, and the
+  // maximize button and its back button right of the pin; a docked topic's
+  // body is wrapped in its pane's scroller (wrapTopic), any other topic's
+  // is not. A board update brings a changed topic's bar anew (a new
+  // section, or the old one with the new bar's content), so this runs
+  // after every settle, and draws a large topic or panel large again on the
+  // node that now stands for it.
   function decorate() {
-    [board, colOn ? pins : null].forEach(function (box) {
+    [board, galEl].forEach(function (box) {
       if (!box) return;
       Array.prototype.forEach.call(box.querySelectorAll("section.topic[data-topic]"), function (sec) {
         var head = child(sec, "tophead"), bar = head && child(head, "tbar");
@@ -565,25 +1227,48 @@
         [["t-fold", "chevron-down", "js.card.fold"], ["t-raise", "arrow-up-to-line", "js.card.raise"], ["d-max", "maximize-2", "js.card.max"], ["d-min", "minimize-2", "js.card.back"]].forEach(function (a) {
           if (!child(bar, a[0])) bar.insertBefore(ibtn(a[0], a[1], wsT(a[2])), child(bar, "tnote-toggle"));
         });
-        // This only attaches intent to the live composer; it never closes a topic.
-        var close = child(bar, "t-close-request");
-        if (sec.classList.contains("closed") || !doc.getElementById("ctext")) {
-          if (close) close.remove();
-        } else {
-          if (!close) close = ibtn("t-close-request", "x", wsT("js.closerequest.add"));
-          bar.appendChild(close);
-        }
         sec.setAttribute("data-size", r && r.folded ? "fold" : "base");
         child(bar, "t-fold").setAttribute("aria-expanded", String(!(r && r.folded)));
         b.setAttribute("aria-pressed", String(on));
-        if (on) sec.setAttribute("data-pinned", ""); else sec.removeAttribute("data-pinned");
+        if (on) sec.setAttribute("data-docked", ""); else sec.removeAttribute("data-docked");
+        if (on && box === galEl) wrapTopic(sec); else unwrapTopic(sec);
       });
     });
     if (maxed && !maxed.files && !(maxed instanceof Card)) follow(maxed);
     countTopics();
   }
+  // wrapTopic separates a docked topic's head from its body: the parts
+  // after .tophead go into one scroller (.gal-pbody) that fills the pane
+  // under a head that does not stick, so nothing a deep link scrolls to
+  // lands under the head. The whiteboard's markup is unchanged; this is
+  // idempotent, and parts a board update brings beside an existing wrapper
+  // (a graft keeps the wrapper) move in alone. unwrapTopic gives the stock
+  // markup back.
+  function wrapTopic(sec) {
+    var head = child(sec, "tophead");
+    if (!head) return null;
+    var body = child(sec, "gal-pbody"), before = [], after = [], past = false, n;
+    if (!body) {
+      body = mk("div", "gal-pbody");
+      sec.insertBefore(body, head.nextSibling);
+    }
+    for (n = head.nextSibling; n; n = n.nextSibling) {
+      if (n === body) past = true;
+      else (past ? after : before).push(n);
+    }
+    var first = body.firstChild;
+    before.forEach(function (x) { put(body, x, first); });
+    after.forEach(function (x) { put(body, x, null); });
+    return body;
+  }
+  function unwrapTopic(sec) {
+    var body = child(sec, "gal-pbody");
+    if (!body) return;
+    Array.prototype.slice.call(body.childNodes).forEach(function (x) { put(sec, x, body); });
+    sec.removeChild(body);
+  }
   // leaveSlot marks the place of a topic that leaves a fetched closed page
-  // (dashboard.js loadClosed) for the pin list or the board: the page's
+  // (dashboard.js loadClosed) for the gallery or the board: the page's
   // show-more index counts it as the server does (dashboard.js
   // morphBoard), so the next page neither skips a topic nor shows one
   // twice.
@@ -599,16 +1284,15 @@
     for (var n = el.firstElementChild; n; n = n.nextElementSibling) if (n.classList.contains(cls)) return n;
     return null;
   }
+  // pinTopic docks a topic on a new page (shown) or undocks it back to the
+  // board, as a card's pin button does.
   function pinTopic(sec, on) {
     var name = topicName(sec);
     if (name === null) return;
     var r = topicRec(name);
     r.el = sec;
-    r.pinned = on ? Date.now() : 0;
     r.at = 0;
-    tidy(r);
-    arrange(r);
-    persist();
+    galSet(on ? G.dock(gal, refOf(r)) : G.undock(gal, refOf(r)), r);
   }
 
   // Shared actions adopt the renderer's topic node rather than wrapping or
@@ -629,8 +1313,14 @@
   function topicUnit(sec) {
     var r = topicRec(topicName(sec)); r.el = sec; return r;
   }
+  // raise puts an unpinned unit at the head of the flow, and a docked
+  // unit's page first in the gallery (shown).
   function raise(u) {
-    if (u.pinned) { drop(u, { pin: true, index: 0 }); return; }
+    if (u.pinned) {
+      var g = G.movePage(gal, G.pageOf(gal, refOf(u)), 0);
+      galSet(G.activate(g, 0, !!(lay && lay.narrow)), null);
+      return;
+    }
     u.at = headTime();
     delete u.rank;
     if (!isCard(u.el)) u.bar = topicAt(u.el);
@@ -642,7 +1332,7 @@
   // their origin rather than borrowing a same-named or unrelated topic.
   function originTopic(n) {
     if (!n || topicName(n) === null || !n.isConnected) return null;
-    for (var p = n.parentNode; p; p = p.parentNode) if (p === board || p === pins) return n;
+    for (var p = n.parentNode; p; p = p.parentNode) if (p === board || p === galEl) return n;
     return null;
   }
   // Navigation reveals only the owning whole-topic fold. Inner disclosures
@@ -654,10 +1344,11 @@
   }
   // Topic dependency navigation resets only a filter that hides its target.
   // Overview may restore asynchronously, so geometry waits for that restoration.
+  // A target on a docked page not shown has that page shown first.
   function revealTopic(node, after) {
     var sec = originTopic(node && node.closest && node.closest("section.topic[data-topic]"));
     if (!sec) return;
-    var reveal = function () { unfoldTopic(sec); if (after) after(); };
+    var reveal = function () { unfoldTopic(sec); activate(node); if (after) after(); };
     if (sec.hasAttribute("data-state-filtered")) selectFilter("all", null, false, reveal);
     else reveal();
   }
@@ -677,7 +1368,7 @@
     Array.prototype.some.call(board.children, function (peer) {
       var other = unitOf(peer), placed = other && !other.loose && other.at;
       if (peer === n) { target = placed ? rank(other) : count; return true; }
-      if (peer === c.el || peer === toolbar || peer === pins) return false;
+      if (peer === c.el || peer === toolbar) return false;
       var time = eff(peer);
       if (time === null) time = -1;
       if (time !== c.at) return false;
@@ -688,17 +1379,23 @@
   }
 
   // --- storage ----------------------------------------------------------------
-  // The record is {cards, topics, bw, bb, cw}: the cards' view state,
-  // the topics pinned or moved by hand, the width left of the pinned
-  // column's handle (bw: the board's .dgrid cell; bb on a page with a
-  // split, the board's own column), and the conversation's beside the
-  // board. A record from before topics joined is the cards' list alone; a
-  // record's w (the column's own width, before the column filled the
-  // window) is dropped. bb's presence marks the post-split width layout:
-  // only a legacy bw without bb is dropped on its first split-page load.
-  // Both modes share a key, so each save preserves the other mode's width.
+  // The record is {cards, topics, bw, bb, cw, gallery}: the cards' view
+  // state, the topics docked or moved by hand, the width left of the
+  // gallery column's handle (bw: the board's .dgrid cell; bb on a page with
+  // a split, the board's own column), the conversation's beside the board,
+  // and the gallery (WsGallery.record: its pages, split trees and the page
+  // shown). cards[].pinned and topics[].p carry the gallery's flat pin
+  // orders (WsGallery.ordinals) too, so a previous build, which knows no
+  // gallery, shows the docked units as its flat pins; a gallery that
+  // disagrees with them (a previous build saved over it) is reconciled
+  // against them on load (WsGallery.load). A record from before topics
+  // joined is the cards' list alone; a record's w (the column's own width,
+  // before the column filled the window) is dropped. bb's presence marks
+  // the post-split width layout: only a legacy bw without bb is dropped on
+  // its first split-page load. Both modes share a key, so each save
+  // preserves the other mode's width.
   function persist() {
-    if (!opt) return;
+    if (!opt || !gal) return;
     var ts = Object.keys(topics).map(function (k) { return topics[k]; }).filter(function (r) { return r.pinned || r.at || r.folded; }).map(function (r) {
       return { n: r.name, p: r.pinned, a: r.at, b: r.bar, f: !!r.folded, rank: r.rank };
     });
@@ -710,11 +1407,14 @@
     if ("bw" in widths) rec.bw = +widths.bw || 0;
     rec[opt.split ? "bb" : "bw"] = boardw;
     rec.cw = convow;
-    opt.save(opt.key, cards.length || ts.length || rec.bb || rec.bw || convow ? JSON.stringify(rec) : null);
+    rec.gallery = G.record(gal);
+    opt.save(opt.key, cards.length || ts.length || rec.bb || rec.bw || convow || gal.pages.length ? JSON.stringify(rec) : null);
+  }
+  function raw() {
+    try { return JSON.parse(opt.load(opt.key) || "null"); } catch (e) { return null; }
   }
   function stored() {
-    var v = null;
-    try { v = JSON.parse(opt.load(opt.key) || "null"); } catch (e) { v = null; }
+    var v = raw();
     if (Array.isArray(v)) v = { cards: v };
     if (!v || typeof v !== "object") v = {};
     if (opt.split && !("bb" in v)) delete v.bw;
@@ -787,7 +1487,7 @@
   Card.prototype.paint = function () {
     var c = this;
     c.el.setAttribute("data-size", c.folded ? "fold" : "base");
-    if (c.pinned) c.el.setAttribute("data-pinned", ""); else c.el.removeAttribute("data-pinned");
+    if (c.pinned) c.el.setAttribute("data-docked", ""); else c.el.removeAttribute("data-docked");
     c.pinBtn.setAttribute("aria-pressed", String(!!c.pinned));
     c.foldBtn.setAttribute("aria-expanded", String(!c.folded));
     c.body.style.height = (c.h || (typeof c.k.base === "function" ? c.k.base(c) : c.k.base) || BASE) + "px";
@@ -824,12 +1524,10 @@
   Card.prototype.fold = function (on) {
     foldUnit(this, on);
   };
+  // pin docks the card on a new page, shown, or undocks it (its page goes
+  // with its last pane).
   Card.prototype.pin = function (on) {
-    this.pinned = on ? Date.now() : 0;
-    this.paint();
-    arrange(this);
-    persist();
-    if (this.k.pinned) this.k.pinned(this);
+    galSet(on ? G.dock(gal, refOf(this)) : G.undock(gal, refOf(this)), this);
   };
   // bump counts as an open: the card moves to the head of the unpinned
   // flow. A pinned card stays where it is.
@@ -845,6 +1543,7 @@
     if (maxed && maxed.files) maximize(null);
     var el = this.el;
     if (opt && opt.reveal) opt.reveal();
+    activate(el);
     var calm = !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
     if (el.scrollIntoView) el.scrollIntoView({ block: "nearest", behavior: calm ? "auto" : "smooth" });
     el.classList.remove("flash");
@@ -858,7 +1557,7 @@
     cards.splice(i, 1);
     if (this.k.close) this.k.close(this);
     if (this.el.parentNode) this.el.parentNode.removeChild(this.el);
-    if (this.pinned) arrange(null); else countTopics();
+    if (this.pinned) { gal = G.undock(gal, refOf(this)); sync(); arrange(null); } else countTopics();
     persist();
   };
   // The handle under the body drags its height; the pointer is captured, so
@@ -921,8 +1620,9 @@
     if (c.files) return (filesColumn() || { width: 1280 }).width;
     if (kind === "terminal") {
       host = n;
-      while (host && host !== board && host !== col) host = host.parentNode;
+      while (host && host !== board && host !== galEl) host = host.parentNode;
       if (!host) host = board;
+      if (host === galEl) host = viewEl;
       w = host && host.getBoundingClientRect().width;
       return w > 0 && isFinite(w) ? w : 960;
     }
@@ -1073,7 +1773,7 @@
   }
   function sheetNode(t) {
     var sel = t.topic ? "section.topic[data-topic]" : "details.entry-panel[data-key]", attr = t.topic ? "data-topic" : "data-key", n = null;
-    [board, col].some(function (box) {
+    [board, galEl].some(function (box) {
       n = box ? Array.prototype.filter.call(box.querySelectorAll(sel), function (x) { return x.getAttribute(attr) === t.key; })[0] || null : null;
       return !!n;
     });
@@ -1150,23 +1850,19 @@
     var u = unitOf(n);
     return u && !u.loose && !u.pinned && (u.at || isCard(n)) ? u.at : topicAt(n);
   }
-  // drop places unit u: to.pin pins it at index to.index of the pin list;
-  // otherwise it stands in the board's open flow between to.after and
+  // drop places unit u: to.pin docks it on a new page (shown); otherwise
+  // it undocks and stands in the board's open flow between to.after and
   // to.before (either null at an end), or, a closed topic, back in the
   // closed section.
   function drop(u, to) {
-    var was = !!u.pinned, topic = !isCard(u.el);
+    var topic = !isCard(u.el), g;
     delete u.rank;
     if (topic && u.loose) { var el = u.el; u = topicRec(u.name); u.el = el; }
     if (to.pin) {
-      // to.index counts the pins that show; a pinned topic still being
-      // fetched (fetchMissing) keeps its order among them.
-      var shown = pinned().filter(function (x) { return x !== u; }), at = shown[to.index];
-      var list = cards.concat(Object.keys(topics).map(function (k) { return topics[k]; })).filter(function (x) { return x.pinned && x !== u; }).sort(function (a, b) { return a.pinned - b.pinned; });
-      list.splice(at ? list.indexOf(at) : list.length, 0, u);
-      list.forEach(function (x, i) { x.pinned = i + 1; });
+      g = G.dock(gal, refOf(u));
       if (topic) u.at = 0;
     } else {
+      g = G.undock(gal, refOf(u));
       u.pinned = 0;
       if (topic && topicAt(u.el) === null) u.at = 0;
       else {
@@ -1175,20 +1871,29 @@
         if (topic) u.bar = topicAt(u.el);
       }
     }
-    if (!topic) u.paint();
-    arrange(u);
-    if (topic) tidy(u);
-    persist();
-    if (!topic && was !== !!u.pinned && u.k.pinned) u.k.pinned(u);
+    galSet(g, u);
+  }
+  // galDrop docks u where a drag let it go on the gallery: to.gal "dock" on
+  // a new page, "append" below what the page at to.pos holds, "place" at
+  // to.zone of the docked pane to.target (an edge splits it, the center
+  // swaps the two), "home" (the narrow view's home dot) back to the board
+  // as its unpin button does, the Main Board shown.
+  function galDrop(u, to) {
+    if (!isCard(u.el) && u.loose) { var el = u.el; u = topicRec(u.name); u.el = el; }
+    var ref = refOf(u);
+    delete u.rank;
+    if (!isCard(u.el)) u.at = 0;
+    if (to.gal === "home") galSet(G.activate(G.undock(gal, ref), -1, true), u);
+    else if (to.gal === "place") galSet(G.place(gal, ref, to.target, to.zone), u);
+    else galSet(to.gal === "append" ? G.append(gal, ref, to.pos) : G.dock(gal, ref), u);
   }
 
   // --- dragging a header ----------------------------------------------------------
   // A topic's title bar or a card's header drags the topic or card; a
   // button, link, or field in it does not. While a drag runs the page holds
-  // its board updates (opt.drag) and the root carries data-bdrag: "col"
-  // with the pinned column shown, "edge" where a first pin would open it
-  // (a drop zone along the right edge), "group" where pins stand atop the
-  // board (the empty pin list shows as a drop zone).
+  // its board updates (opt.drag), the root carries data-bdrag, and the
+  // gallery's rail shows even with no docked page, so a first unit can be
+  // dropped on +.
   var dg = null, dragged = false, line = null, raf = 0;
   function rectOf(el) { return el && el.getClientRects().length ? el.getBoundingClientRect() : null; }
   function inside(r, x, y) { return !!r && x >= r.left && x < r.right && y >= r.top && y < r.bottom; }
@@ -1222,32 +1927,87 @@
     for (var n = el; n && n !== doc.body; n = n.parentNode) if (n.nodeType === 1 && /auto|scroll/.test(getComputedStyle(n).overflowY)) return n;
     return null;
   }
-  // over reads the drop at the pointer: the pin list (the pinned column, or
-  // the pin group atop the board), the right-edge zone, or the board's open
-  // flow. A drop that leaves the item where it stands shows no line.
+  // pageAt is the page the gallery shows under (x, y), {pos, el}: none on
+  // the narrow view's Page 0, where the board shows through.
+  function pageAt(x, y) {
+    if (!galEl || galEl.hidden || !inside(rectOf(viewEl), x, y)) return null;
+    var pos = G.position(gal, !!(lay && lay.narrow));
+    if (pos < 0) return null;
+    return { pos: pos, el: pos >= gal.pages.length ? plusEl : pageEls[gal.pages[pos].id] };
+  }
+  function inRail(x, y) { return !!galEl && !galEl.hidden && !railEl.hidden && inside(rectOf(railEl), x, y); }
+  // boardShown tells whether the Main Board takes drops: always in the wide
+  // view, on Page 0 in the narrow one.
+  function boardShown() { return !(lay && lay.narrow) || G.position(gal, true) < 0; }
+  // paneZone reads a drop on the docked page shown (page el) at (x, y):
+  // the pane under the pointer and its zone (WsGallery.zone: the nearest
+  // edge splits it; the center swaps the two, offered only to a docked
+  // pane, so a board item never unpins the pane it lands on), or null (a
+  // divider, the dragged pane itself).
+  function paneZone(el, x, y, d) {
+    var p = Array.prototype.filter.call(el.querySelectorAll(".gal-pane[data-ref]"), function (n) { return inside(rectOf(n), x, y); })[0];
+    var ref = p && p.getAttribute("data-ref");
+    if (!p || ref === refOf(d.unit)) return null;
+    return { gal: "place", target: ref, zone: G.zone(rectOf(p), x, y, !!d.unit.pinned), pane: p };
+  }
+  // drawZone shows the preview of a zone drop over its pane (null hides
+  // it): the half on the zone's side, the whole pane for the center. The
+  // pane carries data-dz meanwhile.
+  var zoneEl = null, zonePane = null;
+  function drawZone(to) {
+    var p = to && to.pane;
+    if (zonePane && zonePane !== p) zonePane.removeAttribute("data-dz");
+    zonePane = p || null;
+    if (!p) {
+      if (zoneEl) { zoneEl.hidden = true; zoneEl.removeAttribute("data-dz"); }
+      return;
+    }
+    p.setAttribute("data-dz", to.zone);
+    if (!zoneEl) {
+      zoneEl = mk("div", "gal-overlay");
+      zoneEl.setAttribute("aria-hidden", "true");
+    }
+    if (zoneEl.parentNode !== viewEl) viewEl.appendChild(zoneEl);
+    var r = rectOf(p), v = rectOf(viewEl), z = to.zone, I = 3;
+    var w = z === "left" || z === "right" ? r.width / 2 : r.width, h = z === "top" || z === "bottom" ? r.height / 2 : r.height;
+    zoneEl.setAttribute("data-dz", z);
+    zoneEl.style.left = (r.left - v.left + (z === "right" ? r.width - w : 0) + I) + "px";
+    zoneEl.style.top = (r.top - v.top + (z === "bottom" ? r.height - h : 0) + I) + "px";
+    zoneEl.style.width = Math.max(0, w - 2 * I) + "px";
+    zoneEl.style.height = Math.max(0, h - 2 * I) + "px";
+    zoneEl.hidden = false;
+  }
+  // over reads the drop at the pointer: a rail dot (the narrow view's home
+  // dot undocks, a page's dot appends to that page, + docks on a new page),
+  // the page the gallery shows (+ docks on a new page; on a docked page a
+  // pane's zone, paneZone), or the board's open flow. A drop that leaves
+  // the item where it stands lights nothing.
   function over(x, y) {
     var d = dg;
     d.x = x; d.y = y;
-    var to = null, pr = rectOf(pins), zr = d.mode === "edge" ? rectOf(zone) : null, scr = null;
-    if (zr && inside(zr, x, y)) to = { pin: true, index: 0, line: null };
-    else if (inside(rectOf(toolbar), x, y)) { /* the toolbar is never a drop target */ }
-    else if (pr && (inside(pr, x, y) || (colOn && inside(rectOf(col), x, y)))) {
-      var peers = Array.prototype.filter.call(pins.children, function (n) { return n !== d.el; }), s = slot(peers, y, pr);
-      var me = d.unit.pinned ? pinned().indexOf(d.unit) : -1;
-      to = { pin: true, index: s.at, line: me >= 0 && (s.at === me) ? null : s.line };
-      scr = colOn ? pins : scroller(board);
-    } else if (inside(rectOf(scroller(board) || board), x, y)) {
+    var to = null, scr = null, lightEl = null, hit = dotAt(x, y) || pageAt(x, y);
+    if (hit && hit.el !== plusEl && hit.el.classList.contains("gal-page")) to = paneZone(hit.el, x, y, d);
+    else if (hit) {
+      var cur = G.pageOf(gal, refOf(d.unit));
+      if (hit.pos < 0) to = d.unit.pinned ? { gal: "home" } : null;
+      else if (hit.pos >= gal.pages.length) to = { gal: "dock" };
+      else to = hit.pos === cur ? null : { gal: "append", pos: hit.pos };
+      if (to) lightEl = hit.el;
+    } else if (inRail(x, y) || inside(rectOf(toolbar), x, y)) { /* the rail and the toolbar are never drop targets */ }
+    else if (boardShown() && inside(rectOf(scroller(board) || board), x, y)) {
       scr = scroller(board);
       if (!isCard(d.el) && topicAt(d.el) === null) to = d.unit.pinned ? { pin: false, line: null } : null;
       else {
-        var flow = Array.prototype.filter.call(board.children, function (n) { return n !== d.el && (isCard(n) ? !n.hasAttribute("data-pinned") : topicAt(n) !== null); });
+        var flow = Array.prototype.filter.call(board.children, function (n) { return n !== d.el && (isCard(n) || topicAt(n) !== null); });
         var br = rectOf(board), f = slot(flow, y, br), after = flow[f.at - 1] || null, before = flow[f.at] || null;
         var still = !d.unit.pinned && d.el.parentNode === board && flowNext(d.el, -1) === after && flowNext(d.el, 1) === before;
         to = { pin: false, after: after, before: before, line: still ? null : f.line };
       }
     }
     d.to = to;
-    if (zone) zone.classList.toggle("over", !!(to && to.pin && zr && inside(zr, x, y)));
+    spring(hit && hit.el.classList.contains("gal-dot") ? hit : null);
+    markDrop(lightEl);
+    drawZone(to && to.gal === "place" ? to : null);
     drawLine(to && to.line);
     d.scr = scr;
     var sr = rectOf(scr);
@@ -1257,7 +2017,7 @@
   // flowNext is the open-flow node beside n in the board (dir -1: above).
   function flowNext(n, dir) {
     for (var m = dir < 0 ? n.previousElementSibling : n.nextElementSibling; m; m = dir < 0 ? m.previousElementSibling : m.nextElementSibling) {
-      if (isCard(m) ? !m.hasAttribute("data-pinned") : topicAt(m) !== null) return m;
+      if (isCard(m) || topicAt(m) !== null) return m;
     }
     return null;
   }
@@ -1270,7 +2030,7 @@
     if (d.scr.scrollTop !== was) over(d.x, d.y);
   }
   function dragStart(e) {
-    if (overviewOn || dg || !e.isPrimary || (e.button !== undefined && e.button !== 0)) return;
+    if (overviewOn || dg || rg || !e.isPrimary || (e.button !== undefined && e.button !== 0)) return;
     var t = e.target;
     if (!t.closest || t.closest("button, a, input, textarea, select, summary, label")) return;
     var head = t.closest(".tbar, .bc-hd");
@@ -1279,18 +2039,18 @@
     if (!el || el.hasAttribute("data-max") || !(isCard(el) || topicName(el) !== null)) return;
     var u = unitOf(el);
     if (!u) return;
-    dg = { el: el, head: head, unit: u, id: e.pointerId, x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY, on: false, touch: e.pointerType === "touch", timer: 0, to: null, edge: 0, scr: null, mode: "" };
+    dg = { el: el, head: head, unit: u, id: e.pointerId, x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY, on: false, touch: e.pointerType === "touch", timer: 0, to: null, edge: 0, scr: null };
     if (dg.touch) dg.timer = setTimeout(function () { if (dg && !dg.on) dragBegin(); }, HOLD);
   }
   function dragBegin() {
     var d = dg;
     if (!d.el.isConnected) { dg = null; return; }
     d.on = true;
-    d.mode = colOn ? "col" : col && opt.shows && opt.shows(pinned().length + (d.unit.pinned ? 0 : 1)) ? "edge" : "group";
     try { d.head.setPointerCapture(d.id); } catch (x) { /* no capture: the moves still land on the document */ }
     d.el.classList.add("bdrag");
-    doc.documentElement.setAttribute("data-bdrag", d.mode);
+    doc.documentElement.setAttribute("data-bdrag", "");
     if (opt.drag) opt.drag(true);
+    relayout();
     var sel = window.getSelection && window.getSelection();
     if (sel && sel.removeAllRanges) sel.removeAllRanges();
     over(d.x, d.y);
@@ -1322,31 +2082,33 @@
     d.el.classList.remove("bdrag");
     doc.documentElement.removeAttribute("data-bdrag");
     drawLine(null);
-    if (zone) zone.classList.remove("over");
+    markDrop(null);
+    drawZone(null);
+    unspring();
     dragged = true;
     setTimeout(function () { dragged = false; }, 0);
     var to = d.to;
-    if (e && e.type === "pointerup" && to && d.el.isConnected && (to.line || to.pin !== !!d.unit.pinned)) {
-      to.el = d.el;
-      drop(d.unit, to);
+    if (e && e.type === "pointerup" && to && d.el.isConnected) {
+      if (to.gal) galDrop(d.unit, to);
+      else if (to.line || d.unit.pinned) { to.el = d.el; drop(d.unit, to); }
     }
+    relayout();
     if (opt.drag) opt.drag(false);
   }
 
-  // --- the pinned column ----------------------------------------------------------
-  // The page hands an empty element (opt.column's host); the framework
-  // fills it: a width handle on its left edge,
-  // where it meets the board, and the pin list while the column shows.
-  // Each width handle sizes only the panel on its left and pushes the
-  // panels on its right: the rightmost one (the pinned column, which fills
-  // the window, else the board) takes the difference, and a drag stops
-  // where that one would drop below its floor. This handle sizes the board
-  // (--boardw with data-boardw on the root, kept with the pins; double
-  // click goes back to the stylesheet's): on a page with a split
-  // (opt.split) the board's own column, at least SPLITB_MIN, the
-  // stylesheet making the board's cell the conversation, the gap and the
-  // board; elsewhere the board's .dgrid cell, at least BOARDW_MIN. At most
-  // it leaves the column PINW_MIN.
+  // --- the gallery column's width -------------------------------------------------
+  // The gallery's element carries a width handle on its left edge, where
+  // the gallery column meets the board (the stylesheet shows it only in
+  // the wide view's column). Each width handle sizes only the panel on its
+  // left and pushes the panels on its right: the rightmost one (the
+  // gallery column, which fills the window, else the board) takes the
+  // difference, and a drag stops where that one would drop below its
+  // floor. This handle sizes the board (--boardw with data-boardw on the
+  // root, kept in the record; double click goes back to the stylesheet's):
+  // on a page with a split (opt.split) the board's own column, at least
+  // SPLITB_MIN, the stylesheet making the board's cell the conversation,
+  // the gap and the board; elsewhere the board's .dgrid cell, at least
+  // BOARDW_MIN. At most it leaves the column PINW_MIN.
   function setWidth(w) {
     var r = doc.documentElement;
     boardw = w ? Math.max(opt.split ? SPLITB_MIN : BOARDW_MIN, Math.round(w)) : 0;
@@ -1354,14 +2116,14 @@
     else { r.style.removeProperty("--boardw"); r.removeAttribute("data-boardw"); }
   }
   function boardCell() { return board.closest && board.closest(".dgrid"); }
-  function buildCol() {
-    edgeHandle();
-  }
+  // colShown tells whether the wide view shows the gallery as a column
+  // beside the board (not while a drag alone shows it).
+  function colShown() { return !!(lay && lay.column && gal.pages.length); }
   function edgeHandle() {
-    grab("bp-edge", col, function () {
+    grab("bp-edge", galEl, function () {
       freeze();
       var t = tracks(), cell = boardCell(), w = t ? t[1] : cell ? cell.getBoundingClientRect().width : 0;
-      return w ? { w: w, max: w + col.getBoundingClientRect().width - PINW_MIN } : null;
+      return w ? { w: w, max: w + galEl.getBoundingClientRect().width - PINW_MIN } : null;
     }, function (from, dx) {
       setWidth(Math.min(from.w + dx, Math.max(from.max, opt.split ? SPLITB_MIN : BOARDW_MIN)));
     }, function () { freeze(); setWidth(0); }).setAttribute("data-edge", "left");
@@ -1369,9 +2131,9 @@
   // The split handle stands in the gap between the conversation and the
   // board of the page's grid (opt.split; the stylesheet shows it where the
   // two stand side by side) and sizes the conversation's column (--convow,
-  // with data-convow, on the root, kept with the pins; double click goes
+  // with data-convow, on the root, kept in the record; double click goes
   // back to the stylesheet's split): at least CONVW_MIN, and at most what
-  // leaves the rightmost panel its floor: the pinned column PINW_MIN while
+  // leaves the rightmost panel its floor: the gallery column PINW_MIN while
   // it shows (the board keeps its width), else the board SPLITB_MIN. The
   // grid's own resolved tracks give the widths, so the handle needs no
   // knowledge of the grid's children; the stylesheet clamps a width saved
@@ -1390,11 +2152,11 @@
     return t.length === 2 && t[0] > 0 ? t : null;
   }
   // freeze holds the conversation and the board at the widths they show
-  // while the pinned column does, before a handle sizes one of them: a
+  // while the gallery column does, before a handle sizes one of them: a
   // width left to the stylesheet is a share of the cell, which would move
   // with the other handle.
   function freeze() {
-    var t = colOn && tracks();
+    var t = colShown() && tracks();
     if (!t) return;
     if (!convow) setConvo(t[0]);
     if (!boardw) setWidth(t[1]);
@@ -1403,7 +2165,7 @@
     grab("dcv-edge", grid, function () {
       freeze();
       var t = tracks();
-      return t ? { w: t[0], max: t[0] + (colOn ? col.getBoundingClientRect().width - PINW_MIN : t[1] - SPLITB_MIN) } : null;
+      return t ? { w: t[0], max: t[0] + (colShown() ? galEl.getBoundingClientRect().width - PINW_MIN : t[1] - SPLITB_MIN) } : null;
     }, function (from, dx) {
       setConvo(Math.min(from.w + dx, Math.max(from.max, CONVW_MIN)));
     }, function () { freeze(); setConvo(0); });
@@ -1429,23 +2191,29 @@
       e.preventDefault();
     });
     edge.addEventListener("pointermove", function (e) { if (from) move(from, e.clientX - x0); });
-    function end() { if (!from) return; from = null; edge.classList.remove("drag"); persist(); }
+    function end() { if (!from) return; from = null; edge.classList.remove("drag"); relayout(); persist(); }
     edge.addEventListener("pointerup", end);
     edge.addEventListener("pointercancel", end);
-    edge.addEventListener("dblclick", function () { reset(); persist(); });
+    edge.addEventListener("dblclick", function () { reset(); relayout(); persist(); });
     return edge;
   }
-  // fetchMissing finds the pinned topics the served board lacks (closed
+  // fetchMissing finds the docked topics the served board lacks (closed
   // past its cap) through the closed route, page by page from the board's
   // show-more control, until each is found or the route ends: one the
-  // route ends without is gone from the store, and its pin with it. A
-  // failed fetch keeps the pins for the next load, and so does a board
-  // with no show-more control: an empty or not yet loaded board cannot
-  // tell a topic past its cap from one that is gone, so only the route's
-  // answer drops a pin.
+  // route ends without is gone from the store, and it leaves the gallery
+  // (its page with it, when it was the page's last pane). A failed fetch
+  // keeps the gallery for the next load, and so does a board with no
+  // show-more control: an empty or not yet loaded board cannot tell a
+  // topic past its cap from one that is gone, so only the route's answer
+  // undocks a topic.
   function fetchMissing() {
     function missing() { return Object.keys(topics).filter(function (k) { return topics[k].pinned && !topics[k].el; }); }
-    function gone(list) { list.forEach(function (k) { delete topics[k]; }); persist(); }
+    function gone(list) {
+      list.forEach(function (k) { gal = G.undock(gal, "t:" + k); delete topics[k]; });
+      sync();
+      arrange(null);
+      persist();
+    }
     function next(box) {
       var b = box.querySelector("button.closed-more[data-closed-next]");
       return b ? +b.getAttribute("data-closed-next") : 0;
@@ -1485,49 +2253,41 @@
     icon: licon,
     register: function (name, kind) { kinds[name] = kind; },
     // mount starts the framework on the board region el and restores the
-    // stored cards and topics. o: key (the storage key), load and save (the
-    // page's guarded storage), reveal (shows the board column where the
-    // layout shows one column at a time), and for the pinned column:
-    // column (the empty element it fills; optional), shows(n) (whether the
-    // page shows the column for n pins), layout(on) (the column shows or
-    // hides), closed(from, done) (fetches the closed-topic page from index
-    // from and hands its root to done, or null on a failure), adopted(node)
-    // (a topic node the closed route brought, now placed), and drag(on) (a
-    // drag starts or ends: board updates wait meanwhile); split (optional)
-    // is the grid whose conversation column the split handle sizes, where
-    // it stands beside the board. toolbar supplies
-    // overview(), optional download(), and optional files: {el, shown(),
-    // hidden()} for the page-owned, independent toolbar explorer sheet.
+    // stored cards, topics and gallery. o: key (the storage key), load and
+    // save (the page's guarded storage), reveal (shows the board column
+    // where the layout shows one column at a time), and for the gallery:
+    // host (the element the gallery's element joins; the body without
+    // one), mode() (what the page shows: {width, tabs}, its width in px
+    // and whether the layout menu shows one column at a time), layout(s)
+    // (the gallery's shape changed: WsGallery.layout's narrow, column,
+    // overlay and rail, with pages and dragging), closed(from, done)
+    // (fetches the closed-topic page from index from and hands its root to
+    // done, or null on a failure), adopted(node) (a topic node the closed
+    // route brought, now placed), and drag(on) (a drag starts or ends:
+    // board updates wait meanwhile); split (optional) is the grid whose
+    // conversation column the split handle sizes, where it stands beside
+    // the board. toolbar supplies overview(), optional download(), and
+    // optional files: {el, shown(), hidden()} for the page-owned,
+    // independent toolbar explorer sheet.
     mount: function (el, o) {
       board = el;
       opt = o;
-      col = o.column || null;
       overviewOn = false;
       buildToolbar();
-      pins = mk("div", "bpins");
-      pins.id = "bpins";
-      pins.setAttribute("data-pins", "");
-      pins.setAttribute("data-label", wsT("js.pins.title"));
-      pins.setAttribute("data-drop", wsT("js.pins.drop"));
-      if (col) {
-        buildCol();
-        zone = doc.body.appendChild(mk("div", "bpzone", wsT("js.pins.drop")));
-        zone.setAttribute("aria-hidden", "true");
-      }
+      buildGalleryEl(o.host || doc.body);
       if (o.split) splitHandle(o.split);
       var s = stored();
       setWidth(s.bw);
       setConvo(s.cw);
+      gal = G.load(raw(), function (c) { return typeof c.kind === "string" && !!kinds[c.kind]; });
       s.topics.forEach(function (r) { topics[r.n] = { name: r.n, pinned: +r.p || 0, at: +r.a || 0, bar: r.b === null ? null : +r.b || 0, folded: !!r.f, rank: r.rank, el: null }; });
       s.cards.forEach(function (r) { add(r.kind, r); });
-      // The pin list enters the page before anything moves into it, so a
-      // topic pinned on the board moves into it with its frames kept.
-      board.insertBefore(pins, board.firstChild);
-      board.insertBefore(toolbar, pins);
+      sync();
+      cards.forEach(function (c) { c.paint(); });
+      board.insertBefore(toolbar, board.firstChild);
       place(weave(Array.prototype.filter.call(board.childNodes, function (n) { return !fixedNode(n); })), fixedNode);
       persist();
-      [board, col].forEach(function (box) {
-        if (!box) return;
+      [board, galEl].forEach(function (box) {
         box.addEventListener("pointerdown", dragStart);
         box.addEventListener("click", function (e) {
           var b = e.target.closest && e.target.closest(".tpin");
@@ -1544,9 +2304,16 @@
       doc.addEventListener("pointermove", dragMove);
       doc.addEventListener("pointerup", dragEnd);
       doc.addEventListener("pointercancel", dragEnd);
+      doc.addEventListener("pointermove", railMove);
+      doc.addEventListener("pointerup", railEnd);
+      doc.addEventListener("pointercancel", railEnd);
       doc.addEventListener("click", function (e) { if (dragged) { e.preventDefault(); e.stopPropagation(); } }, true);
       // A held touch is a drag, not a scroll.
-      doc.addEventListener("touchmove", function (e) { if (dg && dg.on) e.preventDefault(); }, { passive: false });
+      doc.addEventListener("touchmove", function (e) { if ((dg && dg.on) || (rg && rg.on)) e.preventDefault(); }, { passive: false });
+      if (!resizeBound && typeof window !== "undefined" && window.addEventListener) {
+        resizeBound = true;
+        window.addEventListener("resize", function () { if (board) relayout(); });
+      }
       floatToolbar();
       fetchMissing();
     },
@@ -1568,24 +2335,35 @@
     dismissFiles: function () { if (maxed && maxed.files) maximize(null); },
     // weave and settle are the board morph's two steps (dashboard.js
     // morphBoard): weave takes the nodes the board wants and returns the
-    // placement, {pins, board} (the pin list's nodes and the board
-    // region's, in order); settle settles both around the cards.
+    // placement, {pins, board} (every docked node, in pin order across the
+    // pages, and the board region's nodes, in order); settle puts the
+    // docked nodes in their panes and settles the board around the cards.
     weave: weave,
     settle: function (el, p) { place(p, fixedNode); persist(); },
-    // pinList is the pin list's node; pinnedTopic tells whether a topic
-    // name is pinned on this page (its node stands in the pin list).
-    pinList: function () { return pins; },
+    // gallery is the gallery's element (#bgal); docked is the docked units'
+    // nodes in pin order; isDocked tells whether a node stands in a pane
+    // now; wrap gives a topic section a docked topic's body wrapper (the
+    // board morph wraps a docked topic's incoming section before it grafts
+    // it into the live one); activate shows the page node stands on and
+    // tells whether it switched (WsGallery, activate above).
+    gallery: function () { return galEl; },
+    docked: function () { return pinned().map(function (u) { return u.el; }); },
+    isDocked: function (n) { return !!(n && galEl && n.parentNode && n.parentNode.classList && n.parentNode.classList.contains("gal-pane") && galEl.contains(n)); },
+    wrap: function (sec) { return topicName(sec) === null ? null : wrapTopic(sec); },
+    activate: activate,
     toolbar: function () { return toolbar; },
-    // Hold the one pin list under the toolbar without changing colOn or
-    // the page's width. Overview's view state and interactions live elsewhere.
+    // Overview's view state and interactions live elsewhere; the gallery
+    // stays as it stands meanwhile.
     overview: function (on) { overviewOn = !!on; if (board) arrange(null); },
+    // pinnedTopic tells whether a topic name is docked on this page (its
+    // node stands in a pane).
     pinnedTopic: function (name) { var r = topics[name]; return !!(r && r.pinned && r.el); },
     // relayout places everything again after the page's layout changed
     // (a width crossing, the layout menu).
     relayout: function () { if (board) arrange(null); },
     dragging: function () { return !!(dg && dg.on); },
-    // move places a topic's or card's node as a drop does (to: pin and
-    // index, or after and before in the open flow).
+    // move places a topic's or card's node as a drop does (to: pin, docked
+    // on a new page; or after and before in the open flow).
     move: function (n, to) { var u = unitOf(n); if (u) drop(u, to); },
     // decorate gives topics the page added outside a board update (a
     // fetched closed page) their pin buttons.

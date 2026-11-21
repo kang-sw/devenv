@@ -1,5 +1,5 @@
 ---
-title: "Common permission intent and truthful enforcement for Claude/Pi sessions"
+title: "Claude/Pi 세션용 공통 권한 의도와 실제 적용 상태 보고"
 related:
   261115-research-ws-unified-agent-tool-surface: "research context only; owner 853 approved capture, not permission policy"
   261114-refactor-ws-common-session-interface: "owner 1050 permits bounded T0 controls first; its Phase 2 later absorbs them without changing keys, lineage or input ownership"
@@ -197,6 +197,20 @@ verification scope.
     behavior and dialog composition using these controls. Worker-profile
     Phase 2 owns its exact selection-bearing hire-approval amendment; it does
     not wait for an undefined permission Phase 5 producer.
+15. **Owner (1875)=a, 2026-11-20 — Phase 2 closeout gaps stay in Phase 2.**
+    The Phase 2 closeout audit (merge `88029f6e8`) found three Phase 2
+    clauses still missing on develop; all three are finished inside Phase 2,
+    not moved to Phase 5 or dropped: (1875) the reusable common permission UI
+    with reconnect-aware positive preflight and the full-warning
+    cancel/confirm flow (the dashboard still reads and sends only native
+    `permission_mode`); (1876) current-parent admission for workers started
+    outside `agent.spawn` (legacy and Pi workers still launch without an
+    explicit common authority); (1877) the exported worker permission input,
+    State/control projection, and an authority-accurate worker launch nudge
+    computed after the stored `agent.spawn` authority is read. Phase 2 gets
+    its whole-phase `### Result` only after these land with the Focused
+    Verification Contract cases. Rejected: moving them to Phase 5 (Decision 14
+    forbids Phase 5 from postponing Phase 2 child checks) or dropping them.
 
 ### Directional compatibility evidence
 
@@ -756,6 +770,334 @@ client preflight/reconnect behavior, worker admission, live confinement, Windows
 execution and all deferred phases remain unimplemented or unverified as already
 recorded. No acceptance beyond Phase 2a is claimed.
 
+#### Edition (e9ba42f29) - 2026-11-21
+
+**Decision 15 backend closeout slice — common permission UI remains open.**
+
+This Edition delivers (1876) and (1877) through `e9ba42f29`; it is not a
+whole-Phase 2 Result. The dashboard common-permission UI, reconnect-aware
+positive preflight and full-warning cancel/confirm flow in (1875) remain for a
+separate executor after the mockup. No dashboard UI file changed, and the
+ticket remains `ready/`.
+
+`SpawnSpec.PermissionLevel` is now the exported worker permission input
+(`internal/wsagent/spawn.go:90-94`). Agent-tool wire input remains the existing
+`authority` member and maps to that field. An explicit value is admitted before
+creation, stored in the existing private `permission.json`, and read again
+before process start; omission keeps conservative legacy derivation without
+writeback. Worker State now computes `permission_level`, `permission_source`
+and `permission_enforcement` through the existing optional State members
+(`internal/wsagent/runner.go:1627-1631`). The existing public lowering seam and
+trusted `POST /agents/<id>/settings/permission` route now control workers while
+keeping child model/effort fixed and requiring user authority for raises.
+
+Workers created outside `agent.spawn` now resolve their own current explicit or
+legacy-derived level and their recorded authority parent's current level at
+creation and every fresh process launch. Root workers need no parent ceiling;
+missing/unresolved conversation parents and unclassified worker capability
+surfaces refuse admission instead of guessing. A parent lowered while a child
+process is held does not cause a retroactive kill, but the child's next launch
+is refused. The launch nudge is computed only after the stored/derived level is
+read and distinguishes root workers from workers whose current-parent admission
+passed; neither wording treats a capability loadout as confinement evidence.
+
+The existing server surface needed by (1875) is present: support choices expose
+lead common levels, `POST /agents/leads/permission` owns selection-bearing lead
+creation, and `POST /agents/<id>/settings/permission` owns trusted common-level
+changes, now including workers. The common dashboard control, fresh preflight
+after reconnect/server replacement and full-warning client flow are still the
+unimplemented UI consumers; no new worker route was added here.
+
+Compatibility remains **T0**. The public Go input is additive and omission
+preserves old caller behavior (`spawn.go:90-94,146-152`); State additions use
+`omitempty` (`runner.go:1627-1631`); no MCP tool/argument, HTTP route, Record,
+Profile, registration or key-store shape changed. Explicit worker input reuses
+the private sidecar writer, which retains unknown JSON members
+(`permission_store.go:140-163`). The pinned old Record/registration/label
+writers preserve exact sidecar bytes at fourteen checkpoints and the new reader
+recovers and updates them while retaining unknown members
+(`permission_store_test.go:366-409`). Legacy omission writes no sidecar, so an
+old binary neither needs to understand a new stored field nor destroys one;
+reopening with the new binary recovers every retained explicit selection.
+
+The allocated lite review found one Critical over-admission path and one
+Important nudge accuracy issue. The single correction pass in `5e7a8f4bb`
+classifies every native/ws/plugin/MCP capability surface before deriving a
+legacy worker level and gives root workers authority-accurate wording, with
+creation/restart mixed-loadout and root/child nudge regressions. Per the lite
+review contract, no re-review ran. Review artifact:
+`/Users/kang-sw/.cache/ws@kang-sw-devenv/proj/17da6bdc@c4d08aee/review-paths/6a6d88e8-01-261115-feat-ws-permission-profile-decision15-backend-lite.md`.
+
+Verification from `agents-plugin-tool/`, with complete output read:
+
+```sh
+GOCACHE=/tmp/ws-permission-go-cache GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsagent -race -v -count=1 -run '^TestPermission(WorkerInputStateAndControl|LegacyWorkerMixedLoadouts|CurrentParentAdmission|MissingParentAdmission)$'
+GOCACHE=/tmp/ws-permission-go-cache GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsagent -race -v -count=1 -run '^TestPermission'
+GOCACHE=/tmp/ws-permission-go-cache GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsagent -race -v -count=1 -run '^(TestAgentSpawnCapsAtAHostedLeadsLevel|TestRefusedWakeUnderAHostedLead|TestHeldWorkerChildLoadsBeforeLowerCeilingParent|TestPermissionWorkerInputStateAndControl|TestPermissionCurrentParentAdmission|TestPermissionMissingParentAdmission)$'
+GOCACHE=/tmp/ws-permission-go-cache GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/mcp -v -count=1 -timeout 45m -run '^TestAgent'
+```
+
+All four nonempty selectors passed (1.970 s, 6.164 s, 2.174 s and 2.141 s).
+The MCP selector required local-loopback sandbox permission for its temporary
+HTTP listeners; it used no provider or network service. `git diff --check`
+passed. No live provider, daemon stop/swap, broad suite, dashboard UI test,
+network service, push or merge ran.
+
+Dogfood note: the first lite reviewer was spawned read-only, but the rendered
+review wrapper requires writing its allocated findings artifact; it returned a
+summary while leaving that artifact empty. A fresh workdir-write reviewer
+recovered the review. Separately, `workflow_manual` was unavailable from the ws
+tool surface, so this run used the repository manuals and rendered playbooks.
+
+#### Edition (1a11694a5) - 2026-11-21
+
+**Decision 15 post-merge review closeout — common permission UI remains open.**
+
+The delayed lite review of the merged (1876)/(1877) backend slice found three
+Critical defects and one Important lifecycle defect. Commit `1a11694a5` fixes
+all four without completing Phase 2: (1875)'s common dashboard control,
+reconnect-aware positive preflight and full-warning cancel/confirm flow remain
+open on the separate UI branch, so this ticket stays `ready/` without a
+whole-Phase 2 Result.
+
+- Agent-created children now persist immutable delegation provenance beside
+  their explicit selection in `permission.json`. New generic explicit workers
+  persist `delegated_authority:false`; `agent.spawn` persists `true`; and an
+  absent member remains the pre-provenance compatibility state. An internal
+  agent child with no explicit authority record fails closed, while an old
+  sidecar without the member reopens with its original bounded detached-lead
+  behavior. Omitted legacy top-level `pi.spawn` calls retain their historical
+  workdir-write/advisory projection without sidecar writeback; new explicit
+  generic workers with a missing/unresolved lead parent are refused.
+- Generic `SpawnSpec.PermissionLevel` is authorized against the profile-derived
+  current level before any conversation is created. Supplying
+  `PermissionFullAck` is not user authority: generic `full` additionally needs
+  the trusted package-owned user provenance, while `agent.spawn` keeps its
+  separately bounded delegation exception.
+- A per-session admission RW lock now holds the parent's current selection
+  stable through child creation and every fresh `Backend.Start`. Common-level
+  and native-mode changes take the exclusive side, so a lowering cannot race a
+  higher-authority child process start.
+- Lowering a running worker marks its current process dirty. The active turn
+  finishes on that process, which is then stopped before queued input starts a
+  replacement under the lowered level. Worker State/List projection uses the
+  loop-owned permission fields and performs no permission-sidecar read on the
+  interactive listing path.
+
+Compatibility remains **T0**. `delegated_authority` is an optional member of
+the existing private, unknown-member-preserving `permission.json`; no Record,
+Profile, registration, key, MCP argument, HTTP route or manifest shape changed.
+Pinned old Record/registration/label writers retain the sidecar bytes, the old
+sidecar writer preserves the unknown member during a permission update, and the
+new reader recovers both the level and provenance. Absence is deliberately
+read as the pre-provenance state, so reopening an existing `agent.spawn` child
+does not lose its accepted detached-lead ceiling. New generic false provenance
+survives later lowering, and omitted legacy Pi spawns still write no sidecar.
+
+The correction also fixed two regressions exposed by the expanded package bar:
+open worker State/List again performs zero file operations, and replay approval
+handling reads its Record under the existing lock instead of racing `Send`.
+The fresh independent lite reviewer reported two additional Critical
+compatibility findings: pre-provenance agent sidecars and omitted top-level Pi
+spawns. Both were fixed in the single allowed correction pass; per lite policy
+no re-review ran. No Critical or Important finding remains open.
+
+Verification from `agents-plugin-tool/`, with complete local output read:
+
+```sh
+GOCACHE=/private/tmp/ws-permission-closeout-cache GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go vet ./internal/wsagent
+GOCACHE=/private/tmp/ws-permission-closeout-cache GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsagent -race -count=1 -run '^TestPermission'
+GOCACHE=/private/tmp/ws-permission-closeout-cache GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsagent -race -count=1 -run '^(TestAgentSpawn|TestRefusedWake|TestHeldWorker|TestRecordUnknownMembersRoundTrip|TestLeadRejoin|TestPiRevive|TestPiWorkerRecovery|TestProfileSpawn|TestSpawn|TestWorkerHolder)'
+```
+
+All three passed. Focused race selectors also passed the missing-authority,
+pre-provenance reopen, legacy detached-lead, generic full-user gate, concurrent
+parent lowering, native-mode locking, turn-boundary worker replacement,
+custom-profile Pi spawn and zero-file-I/O regressions. The worker sandbox
+denied loopback listeners, so the lead ran the final tree with loopback:
+`go test ./internal/mcp -count=1 -run '^TestAgent'` passed (2.19 s), the real
+Pi-forward and hosted CLI token integration selectors passed, and
+`go test ./internal/wsagent -count=1` passed every test except the known
+pre-existing `TestPiMaterializerSourceDriftDoesNotDisplacePreparedBundle`
+payload-drift failure that also fails on develop. No provider, live harness,
+daemon replacement, dashboard UI, network service, push or merge ran.
+
+#### Edition (fca18b571) - 2026-11-21
+
+**Decision 15 (1875) common permission UI slice — partial Phase 2 delivery.**
+
+This Edition delivers Decision 15 item (1875) on `impl/develop/permission-common-ui`
+through `fca18b571` (`c9e9f0072..fca18b571`); it is not a whole-Phase 2 Result,
+and the ticket remains `ready/`.
+
+What landed:
+
+- `c9e9f0072`: Reusable common permission level controls in the lead creation
+  popover, the session menu, and the session header permission chip
+  (`internal/wsdashboard/assets/{dashboard-leads.js,dashboard-rail.css,dashboard-stream.js,dashboard-lifecycle.js,dashboard-rail-popovers.js,rail.js}`,
+  `en.json`/`ko.json`, and `testdata/permission-controls.test.cjs` wired into
+  `TestLeadPopoverLaunchBehavior`). Creation defaults to "default (existing
+  behavior)" (legacy `/agents/leads` with native mode under Advanced); explicit
+  levels own the native mode and post only to `/agents/leads/permission` after a
+  fresh `/support/choices` read; `full` opens the confirmation warning whose
+  checkbox enables the grant carrying `permission_full_ack:true` (cancel/Escape
+  sends nothing). Session menu renders intent, native mode and evidence
+  separately (absent observation is `pending`), dashes/tags legacy-derived
+  levels, posts changes to `/agents/<id>/settings/permission`, keeps native
+  controls on `/settings`, and shows state only (no selector) for workers.
+  Stream drops advance `permEpoch` so pre-drop support cannot carry across a
+  daemon swap; 404/405 refusals show an error and offer re-check without
+  retrying legacy URLs.
+- `da65db345`: Added all 65 `js.perm.*` strings across the nine remaining
+  `internal/wsi18n/tables/` locales (`de`, `es`, `fr`, `it`, `ja`, `pt-BR`,
+  `ru`, `zh-Hans`, `zh-Hant`).
+- `1ba1796be`: Fixed the creation segment tagging the default button as derived,
+  wired the shell's mirrored permission chip click to the session menu, and added
+  isolated Chromium acceptance `TestPermissionUIBrowser`
+  (`permission_ui_browser_test.go`, `testdata/permission-ui.browser.cjs`).
+- `f7071a099` and `72a1f551d`: Prefixed permission state-grid `.k`/`.v` classes
+  to `.pmk`/`.pmv` (avoiding collision with whiteboard `.v`), guarded
+  `permStreamSync` in `dashboard-stream.js` for stream-only harnesses, and
+  refreshed the Chromium captures and `compare-*.png` sheets under
+  `ai-docs/assets/mockups/261121/permission-common-ui/`.
+- `fca18b571`: Addressed the Important review finding by adding mid-request
+  stream-drop coverage to `testdata/permission-controls.test.cjs` (a pre-drop
+  `/support/choices` response arriving after `connected(false)` during creation
+  open, creation Start preflight, and session-menu preflight cannot satisfy the
+  new epoch or trigger `/agents/leads/permission` or
+  `/agents/<id>/settings/permission`).
+
+Contract fixture name mapping (backend `wsagent` tests are outside this UI
+branch's scope):
+
+- `TestPermissionRouteSupportAndSwap` does not exist under that name; its cases
+  are covered across `TestPermissionSupport`
+  (`internal/wsagent/permission_http_test.go:236-270`),
+  `TestPermissionPinnedRouter`
+  (`internal/wsagent/permission_http_test.go:272-359` — positive preflight
+  followed by pinned `90eacda7e` router 405/404 with zero creates/settings/files),
+  `TestPermissionHTTPRegistryAbsentAndLegacy`
+  (`internal/wsagent/permission_http_test.go:164-195`), and
+  `TestPermissionHTTPInvalidZeroWrites`
+  (`internal/wsagent/permission_http_test.go:65-107`), plus dashboard client
+  reconnect/swap/refusal coverage in `testdata/permission-controls.test.cjs` and
+  `testdata/permission-ui.browser.cjs`. Unsupported MCP tool schema is N/A in
+  Phase 2 (no MCP argument or schema change in Phase 2).
+- `TestPermissionSidecarLifecycle` does not exist under that name; its live
+  hosted retention and expired-directory pruning cases are covered inside
+  `TestPermissionSidecarOldWriteNewReopen`
+  (`internal/wsagent/permission_store_test.go:322-439`, subtests `hosted`,
+  `expired`, `deleted` at lines 366, 411-438) and its pinned `90eacda7e`
+  `PruneRegistrations` harness `TestPermissionPinnedWriters`
+  (`internal/wsagent/permission_store_test.go:442-478`, lines 471-477).
+
+Visual comparison (`ai-docs/assets/mockups/261121/permission-common-ui/compare-*.png`
+vs `ai-docs/tickets/assets/261115-feat-ws-permission-profile/` across dark/light
+at 1440 and 420 for `create`, `create-pi`, `full-warning`, `settings`,
+`settings-picked`, `state`, and `unsupported`): **match** on all permission
+controls, states, warnings, and unsupported flows, with only expected
+production/fixture differences: updated `develop` page chrome (Memos panel, Plan
+usage, rail/header styling), popovers retaining existing production rows
+(model/effort/plugin isolation in creation; existing hand-to-terminal action in
+session menu), refusal banner positioned above the action buttons below those
+rows in `unsupported` panel B, fixture folder path without branch in
+`create`/`full-warning`, separate real-header head-chip tiles in `state`, and
+one minor Korean phrasing difference (`고른 수준(읽기 전용)은 보내지 않습니다` vs
+mockup `고른 읽기 전용은 보내지 않습니다` in `unsupported` B2).
+
+Compatibility remains **T0**: UI consumes optional `permission_levels` and
+computed State fields without modifying stored records or legacy native routes,
+and never falls back silently from a refused `/permission` route to a legacy
+route.
+
+Verification from `agents-plugin-tool/`, with complete output read:
+
+```sh
+node internal/wsdashboard/testdata/permission-controls.test.cjs
+node internal/wsdashboard/testdata/lead-popover.test.cjs
+node --test internal/wsdashboard/new-session.test.js
+node internal/wsdashboard/testdata/board-home-ack.test.cjs
+GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsdashboard -v -count=1 -run '^(TestLeadPopoverLaunchBehavior|TestLeadPopoverIsolationWiring|TestRailScript|TestCSSClassesDoNotCollideAcrossModules|TestHiddenFrameHoldsItsUpdatesUntilShown)$'
+PLAYWRIGHT_BROWSERS_PATH="$HOME/Library/Caches/ms-playwright" WS_PLAYWRIGHT_MODULE="/Users/kang-sw/.npm/_npx/705bc6b22212b352/node_modules/playwright" GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsdashboard -v -count=1 -run '^TestPermissionUIBrowser$'
+GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsi18n -v -count=1 -run '^(TestOtherTablesHoldEveryEnglishKey|TestPlaceholdersMatchEnglish)$'
+GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsagent -v -count=1 -run '^TestPermission(PinnedRouter|Support|SidecarOldWriteNewReopen)$'
+```
+
+All eight commands passed (`permission-controls.test.cjs` passed;
+`lead-popover.test.cjs` passed; `new-session.test.js` 2/2;
+`board-home-ack.test.cjs` 10/10; focused `wsdashboard` Go tests 1.020 s;
+`TestPermissionUIBrowser` 50.23 s / 50.750 s total; `wsi18n` table/placeholder
+checks 0.397 s — `TestEveryEnglishKeyIsUsed` for unrelated `wb.*` keys is
+already fixed on `develop` in `2a3d08575`; mapped `wsagent` contract tests
+3.418 s). `git diff --check develop...HEAD` passed.
+
+Follow-up Minor review items left unfixed in this slice:
+- `P.dropped` remains set after a transient preflight failure in the creation
+  popover.
+- An out-of-order stale `/support/choices` response within the same epoch can
+  overwrite a newer one.
+- `permPreflight` checks `permission_levels` without re-checking harness
+  lead-capable/available flags.
+- Stale async callbacks clear `P.busy` without a generation check.
+- A confirmed `full` grant in the session menu is dropped silently if the menu
+  closes while preflight is in flight.
+- Three synthetic JS harness test-fidelity gaps vs full browser DOM.
+
+### Result (e0d793991) - 2026-11-21
+
+Phase 2 is complete through `e0d793991`. The root-lead/backend contract and
+recovery corrections landed in `fc40c36d9`, `3ac89f37c` and `c5f54ed4b`;
+worker input, State, current-parent admission and conservative launch reporting
+landed through `e9ba42f29` and `1a11694a5`; the reusable dashboard controls,
+full warning and reconnect/refusal behavior landed through `fca18b571`.
+`e0d793991` closes the final acceptance gap found by the whole-phase audit:
+the fresh selection preflight now requires the requested level on a harness
+that is also currently `lead:true` and `available:true`. Creation and settings
+fixtures prove that unavailable and non-lead responses which still advertise
+levels send no selection-bearing request.
+
+The final UI path keeps the existing refusal/re-check behavior and strings. The
+reviewed dark 1440 capture at
+`ai-docs/assets/captures/261121/permission-unavailable/lead-popover-dark-1440.png`
+shows the lead popover after a selected level becomes unavailable: the common
+level is not sent, the native control is restored, and the action is explicitly
+relabelled. No provider, account, global harness config or live daemon was used.
+
+Compatibility remains **T0**. The closeout changes only current-server UI
+admission and fixtures. The phase's explicit selection remains in the private,
+unknown-member-preserving `permission.json` writer
+(`internal/wsagent/permission_store.go:120-140,185-209`), legacy omission writes
+no sidecar, and optional State fields remain `omitempty`
+(`internal/wsagent/runner_state.go:75-77`). No MCP tool/argument, HTTP route,
+Record, Profile, registration, key-store or manifest shape changed. Old callers
+retain their legacy URLs and native controls; current clients refuse unsupported
+selection locally with no fallback write.
+
+Final verification from `agents-plugin-tool/`, with complete output read:
+
+```sh
+node internal/wsdashboard/testdata/permission-controls.test.cjs
+node internal/wsdashboard/testdata/lead-popover.test.cjs
+node --test internal/wsdashboard/new-session.test.js
+node internal/wsdashboard/testdata/board-home-ack.test.cjs
+GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsdashboard -count=1 -run '^(TestLeadPopoverLaunchBehavior|TestLeadPopoverIsolationWiring|TestRailScript|TestCSSClassesDoNotCollideAcrossModules|TestHiddenFrameHoldsItsUpdatesUntilShown)$'
+PLAYWRIGHT_BROWSERS_PATH=/Users/kang-sw/Library/Caches/ms-playwright WS_PLAYWRIGHT_MODULE=/Users/kang-sw/.npm/_npx/705bc6b22212b352/node_modules/playwright GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsdashboard -v -count=1 -run '^TestPermissionUIBrowser$'
+GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsi18n -count=1 -run '^(TestOtherTablesHoldEveryEnglishKey|TestPlaceholdersMatchEnglish)$'
+GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsagent -count=1 -run '^TestPermission(PinnedRouter|Support|SidecarOldWriteNewReopen)$'
+GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsagent -count=1 -run '^TestPermission'
+GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go vet ./internal/wsdashboard
+GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go build ./...
+```
+
+All commands passed. The full isolated Chromium run covered dark/light at 1440
+and 420 and completed in 59.08 s; the first sandboxed attempt could not bind its
+temporary loopback listener, and the identical command passed with local
+loopback permission. Independent lite review of
+`da8930600..e0d793991` was clean (0 Critical, 0 Important, 0 Minor):
+`/Users/kang-sw/.cache/ws@kang-sw-devenv/proj/17da6bdc@d3adad41/review-paths/47204522-01-findings.md`.
+The remaining Minor UI notes in the preceding Edition do not violate Phase 2
+acceptance and remain forward observations rather than blockers.
+
 ### Phase 3: Add the Codex per-run permission launch path
 
 Deferred until the Codex adapter provides its settled exact-version launch
@@ -772,6 +1114,90 @@ versus observed settings, unavailable observations, nudge-and-launch, legacy
 omission, child admission and T0 callers/storage. Provider-backed sandbox checks
 require separate authorization. Exact adapter methods come from its settled
 contract, not this documentation capture.
+
+### Result (53349aeb5) - 2026-11-21
+
+Phase 3 landed in `090d72e04` with the independent-review corrections in
+`53349aeb5`. The ticket remains `ready/` for Phases 4–5.
+
+- **VERIFIED — per-run mapping and every launch.** Common Codex intent maps
+  `read-only` to `read-only`/`on-request`, `workdir-write` to
+  `workspace-write`/`on-request`, and `full` to
+  `danger-full-access`/`never` (`internal/wsagent/permission.go:40-60`,
+  `internal/wsagent/codex.go:266-274`). The runner rereads the existing
+  selection for each process and passes it transiently in `StartSpec`; Codex
+  puts the pair on `thread/start` or `thread/resume` and every `turn/start`,
+  outside the global `config` object (`internal/wsagent/runner_process.go:441-450`,
+  `internal/wsagent/codex.go:181-219,304-344`). No lead MCP tool is silently
+  pre-approved: the existing tool approval override remains worker-only
+  (`internal/wsagent/codex.go:230-246`).
+- **VERIFIED — actual settings and honest quality.** The 0.160.0 open response
+  and `thread/settings/updated` notification are mapped into `active_mode`
+  (`internal/wsagent/codex_mapper.go:155-194,275-297,320-351`). Exact reported
+  read-only/on-request is `partial`; workdir-write, full, mismatched approval
+  policy, unknown and absent reports stay `advisory`, because MCP and other
+  effects are not proven confined (`internal/wsagent/permission.go:92-105,185-219`).
+  New process and holder-attach boundaries clear process-scoped evidence before
+  replay/open can repopulate it, so a reportless replacement cannot retain old
+  partial quality (`internal/wsagent/runner_process.go:470-487`).
+- **VERIFIED — shared contract and legacy behavior.** Production support now
+  advertises the three already-defined common levels for Codex and the generic
+  dashboard maps them to native modes behind the existing fresh available-lead
+  preflight (`cmd/ws-mcp/dashboard.go:303-315`,
+  `internal/wsdashboard/assets/dashboard-leads.js:70-97`). Explicit choices use
+  the existing unknown-preserving `permission.json` sidecar and optional State
+  projection (`internal/wsagent/permission_store.go:119-140,201-239`,
+  `internal/wsagent/runner_state.go:68-77`). Omission writes no sidecar, sends no
+  sandbox/approval override, derives display from a live reported default only,
+  and does not persist that observation into a later resume
+  (`internal/wsagent/permission.go:64-89,204-218`,
+  `internal/wsagent/runner_events.go:151-176`). Claude and Pi mappings remain
+  unchanged (`internal/wsagent/permission.go:42-50,65-76`).
+- **VERIFIED — fake/protocol coverage.** The synthetic app-server test pins all
+  three request pairs, State, sidecar, nudge, global-config absence, mismatched
+  and unavailable reports, stale-observation invalidation, omission-preserving
+  resume and explicit Codex-parent child refusal
+  (`internal/wsagent/codex_lead_test.go:165-314`). The checked-in 0.160.0
+  transcript independently pins open and per-turn reported settings
+  (`internal/wsagent/codex_fixture_test.go:439-466`). No provider-backed,
+  account-backed, network or live Codex run was used.
+
+**Compatibility tier: T0 transparent (VERIFIED).** This phase adds no MCP/HTTP
+route or argument, hello field, Record member, profile key, manifest key or new
+stored shape. Codex only begins populating the already-optional
+`permission_levels` support member (`internal/wsagent/support.go:225-236,256-264`)
+and reuses the existing optional State members and private sidecar cited above.
+An old daemon omits support, and the current UI's preflight sends no
+selection-bearing request when that member is absent
+(`internal/wsdashboard/assets/dashboard-leads.js:81-97`). Legacy omission is
+also proven not to create storage or freeze a later launch
+(`internal/wsagent/codex_lead_test.go:272-302`). Therefore old callers continue
+on the native Codex path and old storage remains readable without overwrite or
+recovery behavior.
+
+Final verification from `agents-plugin-tool/`:
+
+```sh
+go build ./...
+go vet ./internal/wsagent ./internal/wsdashboard ./cmd/ws-mcp
+test -z "$(gofmt -l cmd/ws-mcp/agent_mcp_test.go cmd/ws-mcp/dashboard.go internal/wsagent/backend.go internal/wsagent/codex.go internal/wsagent/codex_fixture_test.go internal/wsagent/codex_lead_test.go internal/wsagent/codex_mapper.go internal/wsagent/permission.go internal/wsagent/permission_test.go internal/wsagent/registration_permission_mode_test.go internal/wsagent/runner_events.go internal/wsagent/runner_process.go)"
+node internal/wsdashboard/testdata/permission-controls.test.cjs
+go test ./internal/wsagent -count=1
+go test ./internal/mcp -timeout 45m -run '^(TestAgent|TestConfigRegisteredAgentProfile|TestTrackerSupportRegisteredAgentBackend|TestCallAgentlessGate|TestCallDiscoveryRespectsPermissionAndRole)'
+go test ./internal/wsdashboard -run '^TestLeadPopoverLaunchBehavior$' -count=1
+go test ./cmd/ws-mcp -run '^TestAgentRunnerCatalogs$' -count=1
+```
+
+All commands passed; the final full wsagent run took 129.248 s, the focused MCP
+run 4.378 s, the dashboard run 1.332 s and the registration run 0.895 s. An
+earlier full run exposed the now-updated generalized error-string assertion and
+one unrelated Agy watchdog timing failure; each selector passed once in
+isolation, and the complete corrected rerun passed. The first independent
+read-only review of `090d72e04` found one Important stale-observation issue and
+no other findings. `53349aeb5` fixed it and the related legacy-default writeback
+edge; a fresh bounded review of that correction was clean (0 Critical,
+0 Important, 0 Minor). Provider/live behavior and an end-to-end truncated
+holder-replay fixture remain unverified and are not claimed.
 
 ### Phase 4: Add the agy per-run permission launch path
 

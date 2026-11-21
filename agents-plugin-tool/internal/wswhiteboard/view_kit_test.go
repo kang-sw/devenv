@@ -81,7 +81,7 @@ function topic(parent, name, sc, y) { var n = parent.add(new El(name)); n.sc = s
 
 func runViewKit(t *testing.T, cases string) {
 	t.Helper()
-	data, err := embeddedAsset("stream.js")
+	data, err := whiteboardTestAsset("stream.js")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,5 +1,5 @@
 ---
-title: Cover hidden-frame theme and open Settings rail replacement
+title: "숨김 프레임 테마 전환 및 열린 Settings 레일 교체 테스트 보강"
 related:
   261115-feat-ws-dashboard-settings-in-usage-strip: Minor independent Lite review follow-up
 ---

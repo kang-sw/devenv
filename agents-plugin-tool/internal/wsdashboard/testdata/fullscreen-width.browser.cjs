@@ -27,19 +27,19 @@ const html = `<!doctype html><html data-rid="fixture" data-theme="light"><head><
 <div class="tdoc"><p>Topic owns its category; inner code or media never overrides it.</p></div>
 <article class="wb-entry panel" data-kind="panel"><details class="entry-panel" data-key="entry:p1"><summary><span class="entry-recap">Framed entry panel</span><span class="pmeta">p1 · 2 versions</span><button class="ibtn d-max">↗</button><button class="ibtn d-min">↙</button></summary>
 <div class="doc-body entry-body framed"><iframe title="stable entry frame" sandbox="allow-scripts" srcdoc="<p>Stable frame</p>"></iframe><details class="inner-disclosure"><summary>Inner disclosure</summary>Preserved body</details>${'<p>Scrollable panel content</p>'.repeat(50)}</div>
-<details class="panel-versions"><summary>Versions</summary>Independent version state</details></details></article></section></div></div></main><aside class="bpcol" id="bpcol"></aside></div></div>
+<details class="panel-versions"><summary>Versions</summary>Independent version state</details></details></article></section></div></div></main></div></div>
 <section class="fpane" id="toolbar-files" hidden><div class="fhd">Files / fixture</div><input class="fq" aria-label="Search files"><div class="ftree">docs/ · src/ · README.md</div></section>
 <script>const translations=${translations}; function wsT(k,a,b){return k==='js.board.toolbar.count'?'1 open topic':translations[k]||k;}</script>
-<script src="/cards.js"></script><script src="/preview.js"></script><script>
-var W=window.WsCards, board=document.getElementById('r-board'), col=document.getElementById('bpcol');
+<script src="/gallery.js"></script><script src="/cards.js"></script><script src="/preview.js"></script><script>
+var W=window.WsCards, board=document.getElementById('r-board');
 var files=document.getElementById('toolbar-files'), counters={shown:0,hidden:0,sized:0};
 W.register('terminal',{open:function(c){c.title({icon:'square-terminal',name:'Terminal / measured board column'});c.body.innerHTML='<pre>fixture@workspace % go test -run TestFullscreenPanelWidth\\nPASS\\n\\nWidth changes preserve the same content node.\\nNormal width comes from this terminal’s owning column.\\nUse the adjacent button to extend and restore.</pre>';},sized:function(){counters.sized++;}});
 W.register('web',{open:function(c){c.title({icon:'globe',name:'Web card'});c.body.innerHTML='<iframe title="stable web" srcdoc="<h2>Stable web content</h2>"></iframe>';}});
 ['approval','system','other'].forEach(function(k){W.register(k,{open:function(c){c.title({name:k});}});});
 var overviewHeld=false, overviewAfter=null;
 window.WsOverview={holding:function(){return overviewHeld;},after:function(f){overviewAfter=f;}};
-W.mount(board,{key:'fixture-cards',load:function(k){return sessionStorage.getItem(k);},save:function(k,v){if(v===null)sessionStorage.removeItem(k);else sessionStorage.setItem(k,v);},column:col,
- shows:function(n){return innerWidth>=1600&&n>0;},layout:function(on){document.documentElement.toggleAttribute('data-pincol',on);},
+W.mount(board,{key:'fixture-cards',load:function(k){return sessionStorage.getItem(k);},save:function(k,v){if(v===null)sessionStorage.removeItem(k);else sessionStorage.setItem(k,v);},host:document.querySelector('.dbody'),
+ mode:function(){return {width:innerWidth,tabs:false};},layout:function(s){document.documentElement.toggleAttribute('data-pincol',s.column&&s.pages>0);if(s.narrow&&s.rail)document.documentElement.setAttribute('data-gal','narrow');else if(s.column)document.documentElement.setAttribute('data-gal',s.pages?'col':'drag');else document.documentElement.removeAttribute('data-gal');},
  toolbar:{files:{el:files,shown:function(){counters.shown++;},hidden:function(){counters.hidden++;}}}});
 window.fixtureReady=true;
 </script></body></html>`;
@@ -56,7 +56,7 @@ const server = http.createServer((req, res) => {
         : { kind, rel, text: 'const width = "semantic category";\n'.repeat(12), html: '<h1>Markdown preview</h1><p>Prose keeps its category width.</p>', diff: [], frame: '/frame' };
     res.end(JSON.stringify(answer)); return;
   }
-  const assets = { '/cards.js': read('cards.js'), '/preview.js': read('preview.js'), '/dashboard.css': read('dashboard.css'), '/page.css': readAssetSource('wswhiteboard', 'page.css') };
+  const assets = { '/gallery.js': read('gallery.js'), '/cards.js': read('cards.js'), '/preview.js': read('preview.js'), '/dashboard.css': read('dashboard.css'), '/page.css': readAssetSource('wswhiteboard', 'page.css') };
   if (assets[u.pathname]) { res.setHeader('Content-Type', u.pathname.endsWith('.css') ? 'text/css' : 'text/javascript'); res.end(assets[u.pathname]); return; }
   if (u.pathname === '/frame') { res.end('<p>Sandboxed preview</p>'); return; }
   res.writeHead(404); res.end();
@@ -163,8 +163,9 @@ async function shot(page, name) {
   await page.locator('.board-files').click();
   near((await rect(page,'.fpane[data-max]')).width,columnWidth,'Files main column width');
   near((await rect(page,'.fpane[data-max]')).left,(await rect(page,'#bcol')).left,'Files over the main column');
+  await page.setViewportSize({width:2560,height:900});
   await page.locator('.board-toolbar .sheet-width').click();
-  await geometry(page,'.fpane[data-max]',2400,2368,'Files extended');
+  await geometry(page,'.fpane[data-max]',2560,2528,'Files extended');
   await page.locator('.board-toolbar .sheet-width').click();
   await page.locator('.board-files').click();
   assert(await page.locator('.board-files').evaluate(n=>document.activeElement===n));
@@ -172,16 +173,16 @@ async function shot(page, name) {
   await page.evaluate(()=>{window.term=W.open('terminal',{});});
   const boardWidth=(await rect(page,'#r-board')).width;
   await cardClick(page, 'term', '.bc-max');
-  await geometry(page,'.bcard[data-max] .bc-in',2400,Math.min(1920,boardWidth),'Terminal owning board');
+  await geometry(page,'.bcard[data-max] .bc-in',2560,Math.min(1920,boardWidth),'Terminal owning board');
   await page.setViewportSize({width:800,height:900});
   await geometry(page,'.bcard[data-max] .bc-in',800,Math.min(768,boardWidth,1920),'resize clamp');
-  await page.setViewportSize({width:2400,height:900});
-  await geometry(page,'.bcard[data-max] .bc-in',2400,Math.min(1920,boardWidth),'original snapshot after resize');
+  await page.setViewportSize({width:2560,height:900});
+  await geometry(page,'.bcard[data-max] .bc-in',2560,Math.min(1920,boardWidth),'original snapshot after resize');
   await cardClick(page, 'term', '.bc-min'); await cardClick(page, 'term', '.bc-pin');
-  const pinnedWidth=(await rect(page,'#bpcol')).width;
-  assert(pinnedWidth > 0, 'fixture exposes the real optional pinned column');
+  const pinnedWidth=(await rect(page,'#bgal .gal-viewport')).width;
+  assert(pinnedWidth > 0, 'fixture exposes the real gallery column');
   await cardClick(page, 'term', '.bc-max');
-  await geometry(page,'.bcard[data-max] .bc-in',2400,Math.min(1920,pinnedWidth),'Terminal owning pinned column');
+  await geometry(page,'.bcard[data-max] .bc-in',2560,Math.min(1920,pinnedWidth),'Terminal owning pinned column');
   await cardClick(page, 'term', '.bc-min'); await cardClick(page, 'term', '.bc-pin');
   // Overview hands off before maximizing rather than admitting a second owner.
   await page.evaluate(()=>{overviewHeld=true;}); await cardClick(page, 'term', '.bc-max');
@@ -215,7 +216,7 @@ async function shot(page, name) {
   assert.equal(await page.locator('.bcard[data-max] .sheet-width').isVisible(),false,'ineffective extension absent at wide clamped width');
   await page.keyboard.press('Escape');
   // Reopen and reload never remember extension; content is not remounted by width.
-  await page.setViewportSize({width:2400,height:900});
+  await page.setViewportSize({width:2560,height:900});
   await cardClick(page, 'term', '.bc-max'); await page.locator('.bcard[data-max] .sheet-width').click();
   await page.locator('.bc-scrim').click({position:{x:1,y:1}});
   await cardClick(page, 'term', '.bc-max');

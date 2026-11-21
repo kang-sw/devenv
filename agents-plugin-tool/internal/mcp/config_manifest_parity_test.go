@@ -179,3 +179,69 @@ func TestShippedClaudeWatchdogInterval(t *testing.T) {
 		})
 	}
 }
+
+// TestShippedAgyModelWaitConfig pins the package-local agy watchdog manifest:
+// ws enables a 120-second wait, wsflow keeps it off, both default to three
+// automatic continue attempts, and both keys are non-negative integers.
+func TestShippedAgyModelWaitConfig(t *testing.T) {
+	defaults := map[string]map[string]int64{
+		"ws": {
+			"agy.model_wait_timeout_seconds": 120,
+			"agy.model_wait_retries":         3,
+		},
+		"wsflow": {
+			"agy.model_wait_timeout_seconds": 0,
+			"agy.model_wait_retries":         3,
+		},
+	}
+	for _, pkg := range []struct {
+		name string
+		path string
+	}{{"ws", agyManifestPath}, {"wsflow", wsflowAgyManifestPath}} {
+		t.Run(pkg.name, func(t *testing.T) {
+			declared := loadDeclaredConfig(pkg.path)
+			if len(declared.rejected) != 0 {
+				t.Fatalf("%s rejected %v", pkg.path, declared.rejected)
+			}
+			server, _, sessionKey := manifestServer(t, pkg.path)
+			callID := 933000
+			for key, want := range defaults[pkg.name] {
+				k, ok := declared.lookup(key)
+				if !ok {
+					t.Fatalf("%s does not declare %s", pkg.path, key)
+				}
+				if k.Type != declaredTypeInteger || k.Minimum == nil || *k.Minimum != 0 || k.DefaultValue != want {
+					t.Fatalf("%s contract = %+v, want integer >= 0 with default %d", key, k, want)
+				}
+				if got := configGetJSON(t, server, callID, map[string]any{"key": key}); got.Value != float64(want) || got.Scope != "builtin" {
+					t.Fatalf("config.get(%s) = %+v", key, got)
+				}
+				callID++
+				if resp := keyedCall(t, server, callID, sessionKey, "config.tune", map[string]any{"key": key, "value": "-1"}); !toolIsError(t, resp) {
+					t.Fatalf("config.tune(%s=-1) = %s, want a rejection", key, resp)
+				}
+				callID++
+				if resp := keyedCall(t, server, callID, sessionKey, "config.tune", map[string]any{"key": key, "value": "0"}); toolIsError(t, resp) {
+					t.Fatalf("config.tune(%s=0) = %s", key, resp)
+				}
+				callID++
+			}
+		})
+	}
+
+	ws := readManifestJSON(t, agyManifestPath)
+	wsflow := readManifestJSON(t, wsflowAgyManifestPath)
+	wsKeys := manifestKeyObjects(t, agyManifestPath, ws)
+	wsflowKeys := manifestKeyObjects(t, wsflowAgyManifestPath, wsflow)
+	if len(wsKeys) != len(wsflowKeys) {
+		t.Fatalf("agy manifest key counts differ: ws %d, wsflow %d", len(wsKeys), len(wsflowKeys))
+	}
+	for i := range wsKeys {
+		wsKey, wsflowKey := wsKeys[i], wsflowKeys[i]
+		delete(wsKey, "default")
+		delete(wsflowKey, "default")
+		if !reflect.DeepEqual(wsKey, wsflowKey) {
+			t.Fatalf("agy manifest key %d fields other than default differ:\nws     %v\nwsflow %v", i, wsKey, wsflowKey)
+		}
+	}
+}

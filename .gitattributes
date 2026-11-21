@@ -30,5 +30,6 @@ agents-plugin*/native-pi/first-party-manifest.json linguist-generated=true
 
 # Third-party minified bundle; not project source (not split, not counted).
 agents-plugin-tool/internal/wswhiteboard/assets/mermaid/mermaid.min.js linguist-vendored
-# Owner (1321)=a 2026-11-19: the composer script is at 2054 lines; raise its own soft limit instead of splitting.
-/agents-plugin-tool/internal/wsdashboard/assets/dashboard-composer.js ws-size-guard=2500
+# Owner (1853)=b 2026-11-20: holder manager tests (1014) and tracker render (1006) passed 1000 lines; raise their own soft limits.
+/agents-plugin-tool/internal/wsholder/manager_test.go ws-size-guard=1300
+/agents-plugin-tool/internal/wsdashboard/assets/tracker-render.js ws-size-guard=1300

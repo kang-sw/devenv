@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Composer Footer &amp; Context Meter Redesign — Mockup v2</title>
+  <link rel="stylesheet" href="./composer-meter-v2.css">
+</head>
+<body>
+  <main class="page">
+    <header class="hdr">
+      <h1>Composer Footer &amp; Context Meter Redesign — v2</h1>
+      <span class="sub">wsdashboard · slim tonal strip + floating boundary icon meter</span>
+    </header>
+
+    <section class="ctrlbar" aria-label="Mockup controls">
+      <div class="cgroup"><span class="clabel">Theme</span>
+        <div class="seg"><button type="button" data-bind="theme" data-val="dark" aria-pressed="true">Dark</button><button type="button" data-bind="theme" data-val="light" aria-pressed="false">Light</button></div>
+      </div>
+      <div class="cgroup"><span class="clabel">Width</span>
+        <div class="seg"><button type="button" data-bind="width" data-val="normal" aria-pressed="true">Normal 560px</button><button type="button" data-bind="width" data-val="narrow" aria-pressed="false">Narrow 320px</button><button type="button" data-bind="width" data-val="rail" aria-pressed="false">Rail Hover</button></div>
+      </div>
+      <div class="cgroup"><span class="clabel">Harness</span>
+        <div class="seg"><button type="button" data-bind="harness" data-val="claude" aria-pressed="true">Claude</button><button type="button" data-bind="harness" data-val="codex" aria-pressed="false">Codex</button><button type="button" data-bind="harness" data-val="agy" aria-pressed="false">AGY</button><button type="button" data-bind="harness" data-val="pi" aria-pressed="false">Pi</button></div>
+      </div>
+      <div class="cgroup"><span class="clabel">Role</span>
+        <div class="seg"><button type="button" data-bind="role" data-val="lead" aria-pressed="true">Lead</button><button type="button" data-bind="role" data-val="child" aria-pressed="false">Child Preview</button></div>
+      </div>
+      <div class="slider-wrap"><span class="clabel">Context</span>
+        <input id="tok-slider" type="range" min="0" max="210000" step="1000" value="51293" aria-label="Context token count">
+        <span id="slider-val" class="slider-val">51,293 / 180K</span>
+      </div>
+    </section>
+
+    <section class="stage" aria-label="Primary interactive composer">
+      <div class="composer-shell" id="primary-shell">
+        <div class="composer" id="primary-composer">
+          <div id="primary-ctx"></div>
+          <div class="crow">
+            <textarea id="primary-input" rows="1" placeholder="Message Claude lead..."></textarea>
+            <button type="button" class="csend" id="primary-send" aria-label="Send">
+              <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
+            </button>
+          </div>
+          <div class="cfoot">
+            <div class="fpills" id="primary-pills"></div>
+          </div>
+        </div>
+      </div>
+      <div class="stage-meta" id="stage-meta"></div>
+    </section>
+
+    <section class="gallery" aria-label="Comparison and state gallery">
+      <article class="gcard">
+        <h2>Before vs After <span>Noisy chips + status badges → slim tonal strip + floating boundary icon</span></h2>
+        <div class="ba-grid">
+          <div class="ba-box">
+            <div class="ba-title"><b>Before — Claude vs AGY Asymmetry</b><span>Old .cfoot + native 1.0M meter</span></div>
+            <div class="legacy-foot">
+              <span class="legacy-chip">5% 1.0M</span><span>~/devenv</span>
+              <span style="margin-left:auto">5h 18% · 7d 42%</span><span>$1.84</span>
+            </div>
+            <div class="legacy-foot">
+              <span class="legacy-chip">AGY</span><span>no effort/perm chips · folder + cost noise</span>
+            </div>
+          </div>
+          <div class="ba-box">
+            <div class="ba-title"><b>After — Slim Strip + Floating Marker</b><span>No trailing box · 12px icon above crossed tick</span></div>
+            <div id="after-demo-ctx"></div>
+            <div class="cfoot"><div class="fpills" id="after-demo-pills"></div></div>
+          </div>
+        </div>
+      </article>
+
+      <article class="gcard">
+        <h2>Context Meter States <span>7 states + narrow 320px compact variant</span></h2>
+        <div class="state-list" id="state-gallery"></div>
+      </article>
+
+      <article class="gcard">
+        <h2>Footer Rows by Harness &amp; Role <span>5 slim ghost tonal strips (22px height)</span></h2>
+        <div class="foot-list" id="foot-gallery"></div>
+      </article>
+    </section>
+  </main>
+  <div id="fpop-portal" class="fpop" role="listbox" hidden></div>
+  <script src="./composer-meter-v2.js"></script>
+</body>
+</html>

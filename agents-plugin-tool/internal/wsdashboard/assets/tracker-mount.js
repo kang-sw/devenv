@@ -66,6 +66,8 @@
     b.appendChild(el('div', { class: 'tk tk-iwin-back', id: 'tkwin', hidden: '' }, '<div class="iwin" role="dialog" aria-modal="true" tabindex="-1"><div class="iwin-in" id="tkwinbody"></div></div>' +
       '<ul class="tk-mpop" id="tkmpop" role="listbox" aria-label="' + wsT("js.tk.composer.mention.tip") + '" hidden></ul>'));
     b.appendChild(el('dialog', { class: 'tk tk-dlg', id: 'tkdlg' }));
+    b.appendChild(el('dialog', { class: 'tk tk-pm', id: 'tkpm' }));
+    b.appendChild(el('dialog', { class: 'tk tk-dlg tk-orged', id: 'tkorged' }, '<div id="tkorged-body"></div>'));
     // a page without the shared toast stack (the tracker mockup) gets the renderer's own
     if (!window.WsToast) b.appendChild(el('div', { class: 'tk tk-toast', id: 'tktoast', hidden: '' }));
     b.appendChild(el('div', { class: 'tk tk-tip', id: 'tktip', role: 'tooltip', hidden: '' }));
@@ -128,6 +130,7 @@
       if (menuOutside(e, t)) return;
       if (!own(t)) return;
       if (t === $('tkwin')) { closeItemWindow(); return; } // the backdrop
+      if (t === $('tkorged')) { closeOrgEditor(false); return; } // the org-editor backdrop
       if (t.closest('#tkqs')) { if (qs.open) qClose(); else qOpen(); return; }
       var qo = t.closest('[data-qi]'), qh = t.closest('#tkqpop [data-qslot]');
       if (qo) {
@@ -179,6 +182,69 @@
         else if (k === 'msel') { var mr = a.closest('.irow'); if (mr) mselClick(mr, e); }
         else if (k === 'msel-clear') { mselClear(); render(); }
         else if (k === 'mdet') { var mk = ui.store + '|' + d.who; ui.mdet[mk] = !ui.mdet[mk]; render(); }
+        else if (k === 'ofold') { var ok = ui.store + '|' + d.who; ui.ofold[ok] = !ui.ofold[ok]; render(); }
+        else if (k === 'org-edit') openOrgEditor();
+        else if (k === 'oe-close') closeOrgEditor(false);
+        else if (k === 'oe-expand') { if (ui.orged) { ui.orged.fold = {}; renderOrgEditor(); } }
+        else if (k === 'oe-fold') { if (ui.orged && d.who) { ui.orged.fold[d.who] = !ui.orged.fold[d.who]; renderOrgEditor(); } }
+        else if (k === 'oe-adm') { if (ui.orged && d.who) { delete ui.orged.errors._batch; orgEdToggleAdmin(ui.orged, d.who); renderOrgEditor(); } }
+        else if (k === 'oe-undo') {
+          if (ui.orged) {
+            delete ui.orged.errors._batch;
+            if (!orgEdUndo(ui.orged, a.getAttribute('data-key'))) {
+              var ue = ui.orged.lastUndoErr;
+              ui.orged.errors._batch = ue && ue.reason === 'already_head' ? wsT("js.tk.org.err.undo.head", ue.head, ue.other.name)
+                : ue && ue.reason === 'dup_name' ? wsT("js.tk.org.err.undo.name", ue.other.name)
+                : wsT("js.tk.org.err.undo.cycle");
+            }
+            renderOrgEditor();
+          }
+        }
+        else if (k === 'oe-undo-all') { if (ui.orged) { orgEdUndoAll(ui.orged); renderOrgEditor(); } }
+        else if (k === 'oe-save') orgEdSave();
+        else if (k === 'oe-roles') { if (closeOrgEditor(false)) openDialog('admin', {}); }
+        else if (k === 'oe-org-new') {
+          if (ui.orged) {
+            var baseNm = wsT("js.tk.org.new.default"), tryNm = baseNm, nIdx = 2;
+            while (orgEdNameClash(ui.orged, tryNm, '')) tryNm = baseNm + ' ' + (nIdx++);
+            var cr = orgEdCreateOrg(ui.orged, tryNm, '');
+            if (cr.ok) {
+              delete ui.orged.errors._batch;
+              ui.orged.editingOrg = cr.id;
+              renderOrgEditor();
+              var rni = $('tk-oe-rn');
+              if (rni) { rni.focus(); rni.select(); }
+            }
+          }
+        }
+        else if (k === 'oe-org-ren') {
+          if (ui.orged) {
+            ui.orged.editingOrg = a.getAttribute('data-org');
+            renderOrgEditor();
+            var rni2 = $('tk-oe-rn');
+            if (rni2) { rni2.focus(); rni2.select(); }
+          }
+        }
+        else if (k === 'oe-org-del') {
+          if (ui.orged) { delete ui.orged.errors._batch; orgEdDeleteOrg(ui.orged, a.getAttribute('data-org')); renderOrgEditor(); }
+        }
+        else if (k === 'oe-gone-tog') {
+          if (ui.orged) { var goid = a.getAttribute('data-org'); ui.orged.goneOpen[goid] = !ui.orged.goneOpen[goid]; renderOrgEditor(); }
+        }
+        else if (k === 'oe-gone-open') {
+          if (d.item && closeOrgEditor(false)) showItem(d.item);
+        }
+        else if (k === 'iw-ofold') {
+          var fk0 = ui.store + '|' + d.item + '|' + a.getAttribute('data-key');
+          ui.iwOrgFold[fk0] = a.getAttribute('aria-expanded') !== 'true';
+          render();
+        }
+        else if (k === 'retarget-asg') {
+          openPicker('assign', { item: d.item, retarget: { kind: 'assign', rule: a.getAttribute('data-rule'), root: a.getAttribute('data-root'), org: a.getAttribute('data-org') } }, a);
+        }
+        else if (k === 'retarget-cc') {
+          openPicker('cc', { item: d.item, retarget: { kind: 'cc', org: a.getAttribute('data-org') } }, a);
+        }
         else if (k === 'idcopy') copyId(a);
         else if (k === 'new-x') closeNewRow();
         else if (k === 'nchip') newMenu(a.getAttribute('data-step'), a, a.hasAttribute('data-ed'));
@@ -212,6 +278,8 @@
         else if (k === 'tree-closed') { var to = panelState().treeOpen, pid = a.getAttribute('data-parent'); to[pid] = !to[pid]; render(); }
         else if (k === 'tfold') { var fk = ui.store + '|' + a.getAttribute('data-node'), fto = a.getAttribute('data-to'); if (fto) ui.tfold[fk] = fto; else delete ui.tfold[fk]; dsSave('tree.fold', ui.tfold); render(); }
         else if (k === 'wfold') { ui.wfold[ui.store + '|' + a.getAttribute('data-node')] = a.getAttribute('aria-expanded') !== 'true'; render(); }
+        else if (k === 'trfold') { toggleThreadRun(a.getAttribute('data-run')); }
+        else if (k === 'trfold-all') { toggleThreadAll(a.getAttribute('data-all') === 'open'); }
         else if (k === 'psearch-clear') { panelState().q = ''; render(); if ($('psearch')) $('psearch').focus(); }
         else if (k === 'cmode') { (ui.cmodes[ui.store] = ui.cmodes[ui.store] || {})[a.getAttribute('data-card')] = a.getAttribute('data-mode'); dsSave('card.modes', ui.cmodes); render(); }
         else if (k === 'cal') { ui.calMonth[a.getAttribute('data-card')] = a.getAttribute('data-month'); render(); }
@@ -394,7 +462,7 @@
     // a right-click on a row, card, entry, or the item window header opens its menu at the pointer
     document.addEventListener('contextmenu', function (e) {
       var t = e.target;
-      if (!own(t) || t.closest('#tkmenu, #tkdlg, input, textarea, select, a[href]:not([href="#"])')) return;
+      if (!own(t) || t.closest('#tkmenu, #tkdlg, #tkpm, input, textarea, select, a[href]:not([href="#"])')) return;
       var m = t.closest('[data-mitem], [data-item]');
       if (!m) return;
       e.preventDefault();
@@ -418,6 +486,12 @@
     document.addEventListener('keyup', function (e) {
       if (mentionBox(e.target) && /^(ArrowLeft|ArrowRight|Home|End)$/.test(e.key)) mentionSync();
     });
+    // the shared CC / assign picker modal (#tkpm): clicks, search input, IME commit, keyboard, and backdrop/Esc close
+    $('tkpm').addEventListener('click', pmClick);
+    $('tkpm').addEventListener('input', pmInput);
+    $('tkpm').addEventListener('compositionend', pmInput);
+    $('tkpm').addEventListener('keydown', pmKey);
+    $('tkpm').addEventListener('cancel', function (e) { e.preventDefault(); pmClose(true); });
     // the assign popover's rows and chip buttons act on click without taking focus from its search field
     $('tkmenu').addEventListener('mousedown', function (e) { if (e.target.closest('.ap-list .aopt, .ap-chips .ax')) e.preventDefault(); });
     // focus leaving the labels step or the range picker applies the pick (menuFocusOut); focus going
@@ -516,7 +590,7 @@
         return;
       }
       // a host that handled this Esc itself (its own menu, say) marks it defaultPrevented
-      if (e.key !== 'Escape' || e.defaultPrevented || $('tkdlg').open) return;
+      if (e.key !== 'Escape' || e.defaultPrevented || $('tkdlg').open || $('tkorged').open || ($('tkpm') && $('tkpm').open)) return;
       if (ui.win) closeItemWindow();
       else if ((ui.open || ui.page) && mselOn()) { e.preventDefault(); mselClear(); render(); }
       else if (ui.open) collapse();
@@ -546,6 +620,166 @@
     window.addEventListener('popstate', function () { if (routeStore() !== ui.page) applyRoute(); });
     // the host opened its own drawer: an open store collapses (and so syncs)
     document.addEventListener('ws:drawer-open', function () { if (ui.open) collapse(); });
+    // admin org-chart editor modal: Escape discard confirm, search, lead select, and native HTML5 drag-and-drop
+    var oed = $('tkorged');
+    function oeClearHover() {
+      Array.prototype.forEach.call(oed.querySelectorAll('.tk-oe-row.ok, .tk-oe-row.bad, .tk-oe-rootz.ok'), function (n) { n.classList.remove('ok', 'bad'); });
+      Array.prototype.forEach.call(oed.querySelectorAll('.tk-oe-refuse'), function (n) { n.remove(); });
+    }
+    oed.addEventListener('cancel', function (e) { e.preventDefault(); closeOrgEditor(false); });
+    function oeSearchInput(e) {
+      if (e.isComposing || !e.target || e.target.id !== 'tk-oe-q' || !ui.orged) return;
+      ui.orged.q = e.target.value; renderOrgEditor();
+    }
+    oed.addEventListener('input', oeSearchInput);
+    oed.addEventListener('compositionend', oeSearchInput);
+    oed.addEventListener('change', function (e) {
+      if (!ui.orged) return;
+      var hsel = e.target && e.target.closest && e.target.closest('select[data-oe-head]');
+      if (hsel) {
+        delete ui.orged.errors._batch;
+        var hres = orgEdStageOrgHead(ui.orged, hsel.getAttribute('data-oe-head'), hsel.value);
+        if (!hres.ok) ui.orged.errors._batch = orgEdErrText({ code: hres.reason, target: hsel.value });
+        renderOrgEditor();
+        return;
+      }
+      var sel = e.target && e.target.closest && e.target.closest('select[data-oe-sel]');
+      if (!sel) return;
+      delete ui.orged.errors._batch;
+      orgEdStageLead(ui.orged, sel.getAttribute('data-oe-sel'), sel.value);
+      renderOrgEditor();
+    });
+    oed.addEventListener('keydown', function (e) {
+      var rn = e.target && e.target.closest && e.target.closest('.tk-oe-rn[data-oe-rn]');
+      if (!rn || !ui.orged || e.isComposing || e.keyCode === 229) return;
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        orgEdCommitRename(ui.orged, rn.getAttribute('data-oe-rn'), rn.value);
+      } else if (e.key === 'Escape') {
+        e.preventDefault(); e.stopPropagation();
+        ui.orged.editingOrg = null;
+        renderOrgEditor();
+      }
+    });
+    oed.addEventListener('focusout', function (e) {
+      var rn = e.target && e.target.closest && e.target.closest('.tk-oe-rn[data-oe-rn]');
+      if (!rn || !ui.orged) return;
+      var oid = rn.getAttribute('data-oe-rn');
+      if (ui.orged.editingOrg === oid) orgEdCommitRename(ui.orged, oid, rn.value);
+    });
+    oed.addEventListener('dragstart', function (e) {
+      e.stopPropagation();
+      if (!ui.orged || (e.target && e.target.closest && e.target.closest('select, button, input'))) { e.preventDefault(); return; }
+      var badge = e.target && e.target.closest && e.target.closest('.tk-org-badge[data-oe-org-drag]');
+      if (badge) {
+        var oid = badge.getAttribute('data-oe-org-drag');
+        ui.orged.drag = oid;
+        ui.orged.dragKind = 'org';
+        ui.orged.refuse = null;
+        if (e.dataTransfer) { e.dataTransfer.setData('text/plain', 'org:' + oid); e.dataTransfer.effectAllowed = 'move'; }
+        oeClearHover();
+        badge.classList.add('drag');
+        return;
+      }
+      var row = e.target && e.target.closest && e.target.closest('.tk-oe-row[data-oe-id]');
+      if (!row) return;
+      var id = row.getAttribute('data-oe-id');
+      ui.orged.drag = id;
+      ui.orged.dragKind = 'member';
+      ui.orged.refuse = null;
+      if (e.dataTransfer) { e.dataTransfer.setData('text/plain', id); e.dataTransfer.effectAllowed = 'move'; }
+      oeClearHover();
+      Array.prototype.forEach.call(oed.querySelectorAll('.tk-oe-row.drag'), function (n) { n.classList.remove('drag'); });
+      row.classList.add('drag');
+    });
+    oed.addEventListener('dragover', function (e) {
+      e.stopPropagation();
+      var ed = ui.orged;
+      if (!ed || !ed.drag) return;
+      var z = e.target && e.target.closest && e.target.closest('.tk-oe-rootz');
+      var row = e.target && e.target.closest && e.target.closest('.tk-oe-row[data-oe-id]');
+      if (ed.dragKind === 'org') {
+        if (!row) { oeClearHover(); return; }
+        var otid = row.getAttribute('data-oe-id');
+        var curOrg = orgEdProjectedOrgs(ed)[ed.drag];
+        if (!curOrg || curOrg.head === otid) { oeClearHover(); return; }
+        var held = orgEdHeadOf(ed, otid);
+        if (held && held.id !== ed.drag) {
+          if (!row.classList.contains('bad')) {
+            oeClearHover();
+            row.classList.add('bad');
+            row.insertAdjacentHTML('afterend', orgEdRefuseHtml({ kind: 'org_head', target: otid, otherName: held.name, orgName: curOrg.name }));
+          }
+          return;
+        }
+        if (!row.classList.contains('ok')) { oeClearHover(); row.classList.add('ok'); }
+        e.preventDefault();
+        if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+        return;
+      }
+      if (z) {
+        if (!z.classList.contains('ok')) { oeClearHover(); z.classList.add('ok'); }
+        e.preventDefault();
+        if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+        return;
+      }
+      if (!row) { oeClearHover(); return; }
+      var tid = row.getAttribute('data-oe-id');
+      if (tid === ed.drag) { oeClearHover(); return; }
+      if (orgEdIsInSubtree(orgEdProjectedLeads(ed), tid, ed.drag)) {
+        if (!row.classList.contains('bad')) {
+          oeClearHover();
+          row.classList.add('bad');
+          row.insertAdjacentHTML('afterend', orgEdRefuseHtml(ed.drag, tid));
+        }
+        return; // omit preventDefault so the browser refuses the drop
+      }
+      if (!row.classList.contains('ok')) { oeClearHover(); row.classList.add('ok'); }
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+    });
+    oed.addEventListener('drop', function (e) {
+      e.stopPropagation();
+      var ed = ui.orged;
+      if (!ed || !ed.drag) return;
+      e.preventDefault();
+      var dragId = ed.drag, dragKind = ed.dragKind;
+      ed.drag = null; ed.dragKind = null;
+      var z = e.target && e.target.closest && e.target.closest('.tk-oe-rootz');
+      var row = e.target && e.target.closest && e.target.closest('.tk-oe-row[data-oe-id]');
+      if (dragKind === 'org') {
+        if (row) {
+          var otid = row.getAttribute('data-oe-id');
+          var curOrg = orgEdProjectedOrgs(ed)[dragId];
+          if (otid && curOrg && curOrg.head !== otid) {
+            delete ed.errors._batch;
+            var ores = orgEdStageOrgHead(ed, dragId, otid);
+            if (!ores.ok && ores.reason === 'already_head') {
+              ed.refuse = { kind: 'org_head', target: otid, otherName: ores.other.name, orgName: curOrg.name };
+            }
+          }
+        }
+        renderOrgEditor();
+        return;
+      }
+      if (z) { delete ed.errors._batch; orgEdStageLead(ed, dragId, ''); }
+      else if (row) {
+        var tid = row.getAttribute('data-oe-id');
+        if (tid && tid !== dragId) {
+          delete ed.errors._batch;
+          var res = orgEdStageLead(ed, dragId, tid);
+          if (!res.ok && res.reason === 'cycle') ed.refuse = { member: dragId, target: tid };
+        }
+      }
+      renderOrgEditor();
+    });
+    oed.addEventListener('dragend', function (e) {
+      e.stopPropagation();
+      if (!ui.orged) return;
+      ui.orged.drag = null; ui.orged.dragKind = null;
+      oeClearHover();
+      Array.prototype.forEach.call(oed.querySelectorAll('.tk-oe-row.drag, .tk-org-badge.drag'), function (n) { n.classList.remove('drag'); });
+    });
   }
 
   function mount(adapter, opts) {
@@ -570,6 +804,7 @@
       leavePage: leavePage,
       viewerChanged: function (id) {
         ui.last = null;
+        closeOrgEditor(true);
         if (id === ui.store && viewing()) bringUp(id);
         render();
       },

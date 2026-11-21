@@ -100,6 +100,9 @@ type Event struct {
 	TurnStartedAt int64 `json:"turnStartedAt,omitempty"`
 	// BackgroundTasks counts running background tasks for a subagent row.
 	BackgroundTasks int `json:"backgroundTasks,omitempty"`
+	// Holding and Alive carry live hosted-worker liveness onto Pi agent rows.
+	Holding bool `json:"holding,omitempty"`
+	Alive   bool `json:"alive,omitempty"`
 	// Caption replaces the caption when present; "" clears it.
 	Caption *string `json:"caption,omitempty"`
 	// Batches replaces the agent's batch list when present.
@@ -122,7 +125,10 @@ type Event struct {
 	// under a "status" key, which is an agent's status above.
 	Context *UsageContext `json:"context,omitempty"`
 	Limits  []UsageLimit  `json:"limits,omitempty"`
-	Cost    *UsageCost    `json:"cost,omitempty"`
+	// LimitsAsOf is the host observation time for Limits, not this status
+	// event's delivery time. It is absent for legacy producers.
+	LimitsAsOf int64      `json:"limitsAsOf,omitempty"`
+	Cost       *UsageCost `json:"cost,omitempty"`
 	// Task counts are sent only when intake advertises task_counts as well as status.
 	Background *int `json:"background,omitempty"`
 	Monitors   *int `json:"monitors,omitempty"`
@@ -134,6 +140,7 @@ type Event struct {
 	// Observed is optional response evidence on status (lead) or agent (child).
 	// It never changes the meaning of Model/Effort or permits lead telemetry.
 	Observed      *ModelObservation `json:"observed,omitempty"`
+	OutputRate    *OutputRate       `json:"outputRate,omitempty"`
 	Model         string            `json:"model,omitempty"`
 	Effort        string            `json:"effort,omitempty"`
 	ContextTokens *float64          `json:"contextTokens,omitempty"`
@@ -166,6 +173,9 @@ type Result struct {
 	// record that is its agent's first, latest or a model change, and the
 	// record after it when a late record makes that one a change point.
 	Observed []ObservedRecord
+	// OutputRate holds a newly updated session output rate that durable storage
+	// should persist to OutputRateName.
+	OutputRate *OutputRate
 }
 
 type activityState struct {
@@ -191,6 +201,7 @@ type agentState struct {
 	contextTokens                        int64
 	outputTps                            float64
 	bgTasks                              int
+	holding, alive                       bool
 }
 
 // State is one session's live state: the reducer from adapter events to a
@@ -210,6 +221,7 @@ type State struct {
 	previousTurnMs int64
 	summary        summaryState
 	lastTurnOutput *ModelObservation
+	outputRate     *OutputRate
 	reply          *Reply
 	// compactStartedAt is the running compaction's start, 0 when none runs;
 	// compactTrigger is its trigger, which an end without one inherits.
@@ -296,7 +308,7 @@ func (st *State) Apply(ev Event, now int64) (Result, error) {
 	switch ev.Kind {
 	case KindReset:
 		st.summary.resync = st.turnStartedAt > 0
-		*st = State{replyID: st.replyID, adapter: st.adapter, scrub: st.scrub, agents: map[string]*agentState{}, batchesEnded: st.batchesEnded, host: st.host, summary: st.summary, observations: st.observations, observed: st.observed, lastTurnOutput: st.lastTurnOutput}
+		*st = State{replyID: st.replyID, adapter: st.adapter, scrub: st.scrub, agents: map[string]*agentState{}, batchesEnded: st.batchesEnded, host: st.host, summary: st.summary, observations: st.observations, observed: st.observed, lastTurnOutput: st.lastTurnOutput, outputRate: st.outputRate}
 		st.lead.phase = PhaseIdle
 		res.Changed = true
 	case KindTurnStart:
@@ -484,6 +496,12 @@ func (st *State) Apply(ev Event, now int64) (Result, error) {
 			}
 		}
 	}
+	if ev.Kind == KindStatus && ev.OutputRate != nil {
+		if changed, persist := st.setOutputRate(ev.OutputRate); changed {
+			res.OutputRate = persist
+			res.Changed = true
+		}
+	}
 	st.refreshPhases(at)
 	st.retain()
 	if st.lead.phase != leadPhase || st.reply != leadReply {
@@ -611,7 +629,7 @@ func (st *State) applyAgent(ev Event, at int64) error {
 		batches = st.normalizeBatches(ev.Batches)
 	}
 	if ev.AgentID == "" {
-		if ev.Status != "" || ev.ParentID != "" || ev.Label != "" || ev.SessionKey != "" || ev.AgentKind != "" || ev.Harness != "" || ev.ActiveMs != 0 || ev.TurnStartedAt != 0 || ev.BackgroundTasks != 0 || hasTelemetry(ev) || ev.Observed != nil {
+		if ev.Status != "" || ev.ParentID != "" || ev.Label != "" || ev.SessionKey != "" || ev.AgentKind != "" || ev.Harness != "" || ev.ActiveMs != 0 || ev.TurnStartedAt != 0 || ev.BackgroundTasks != 0 || ev.Holding || ev.Alive || hasTelemetry(ev) || ev.Observed != nil || ev.OutputRate != nil {
 			return fmt.Errorf("the lead takes only batches and caption; set agentId for a subagent")
 		}
 		st.setActivity(&st.lead, ev, batches)
@@ -663,6 +681,9 @@ func (st *State) applyAgent(ev Event, at int64) error {
 		}
 		a.status = ev.Status
 		a.permission = nil
+		if ev.AgentKind != AgentKindPi {
+			a.holding, a.alive = false, false
+		}
 		st.batchesEnded += uint64(len(closeBatches(&a.activityState, at)))
 	}
 	if ev.AgentKind == AgentKindPi {
@@ -672,6 +693,8 @@ func (st *State) applyAgent(ev Event, at int64) error {
 		a.activeMs = max(ev.ActiveMs, 0)
 		a.turnStartedAt = max(ev.TurnStartedAt, 0)
 		a.bgTasks = max(ev.BackgroundTasks, 0)
+		a.holding = ev.Holding
+		a.alive = ev.Alive
 	} else if ev.BackgroundTasks > 0 || ev.Status == StatusFailed {
 		a.bgTasks = max(ev.BackgroundTasks, 0)
 	}
@@ -924,10 +947,44 @@ func (st *State) retain() {
 		}
 		groups[id] = append(groups[id], a)
 	}
+	canonical := func(id string) string {
+		if target := st.spawnAliases[id]; st.agents[target] != nil {
+			return target
+		}
+		return id
+	}
+	protected := map[string]bool{}
+	for id := range groups {
+		a := st.agents[id]
+		if a.status == StatusRunning || a.bgTasks > 0 || a.holding || a.alive {
+			protected[id] = true
+		}
+	}
+	seeds := make([]string, 0, len(protected))
+	for id := range protected {
+		seeds = append(seeds, id)
+	}
+	for _, start := range seeds {
+		visited := map[string]bool{start: true}
+		cur := start
+		for {
+			a := st.agents[cur]
+			if a == nil || a.parentID == "" {
+				break
+			}
+			p := canonical(a.parentID)
+			if visited[p] || st.agents[p] == nil || groups[p] == nil {
+				break
+			}
+			visited[p] = true
+			protected[p] = true
+			cur = p
+		}
+	}
 	var running, finished []*agentState
 	for id := range groups {
 		a := st.agents[id]
-		if a.status == StatusRunning || a.bgTasks > 0 {
+		if protected[id] {
 			running = append(running, a)
 		} else {
 			finished = append(finished, a)
@@ -999,6 +1056,8 @@ func (st *State) SeedFinished(prev Snapshot) {
 			endedAt:       p.EndedAt,
 			activeMs:      p.ActiveMs,
 			touched:       p.EndedAt,
+			// Holding and Alive are intentionally not seeded from disk (T0):
+			// liveness is republished solely from RAM by live writers.
 			model:         cleanLine(st.scrub.scrub(p.Model), ModelRunes),
 			effort:        cleanLine(st.scrub.scrub(p.Effort), EffortRunes),
 			contextTokens: p.ContextTokens,
@@ -1034,6 +1093,7 @@ func (st *State) Snapshot(now int64) Snapshot {
 		Lead: Lead{
 			Observed:         st.observed[""].clone(),
 			LastTurnOutput:   cloneObservation(st.lastTurnOutput),
+			OutputRate:       cloneOutputRate(st.outputRate),
 			Activity:         st.lead.view(),
 			TurnStartedAt:    st.turnStartedAt,
 			TurnOrigin:       st.turnOrigin,
@@ -1064,12 +1124,14 @@ func (st *State) Snapshot(now int64) Snapshot {
 			AgentKind:     a.kind,
 			Harness:       a.harness,
 
-			Observed:      st.observed[a.id].clone(),
+			Observed:        st.observed[a.id].clone(),
 			Model:           a.model,
 			Effort:          a.effort,
 			ContextTokens:   a.contextTokens,
 			OutputTps:       a.outputTps,
 			BackgroundTasks: a.bgTasks,
+			Holding:         a.holding,
+			Alive:           a.alive,
 		})
 	}
 	sort.Slice(snap.Agents, func(i, j int) bool {
@@ -1321,7 +1383,7 @@ func normalizeTokens(raw json.RawMessage) *TokenUsage {
 // is dropped (the last of a kind wins, the 5-hour limit first), and nil when
 // nothing is left.
 func normalizeUsage(ev Event) *Usage {
-	u := &Usage{Background: taskCount(ev.Background), Monitors: taskCount(ev.Monitors)}
+	u := &Usage{Background: taskCount(ev.Background), Monitors: taskCount(ev.Monitors), LimitsAsOf: max(ev.LimitsAsOf, 0)}
 	if c := ev.Context; c != nil {
 		ctx := &UsageContext{Window: max(c.Window, 0)}
 		if c.Tokens != nil && *c.Tokens >= 0 {
@@ -1341,7 +1403,10 @@ func normalizeUsage(ev Event) *Usage {
 			hit := *c.CacheHit
 			ctx.CacheHit = &hit
 		}
-		if ctx.Window > 0 || ctx.Tokens != nil {
+		if comp := normalizeCompaction(c.Compaction); comp != nil {
+			ctx.Compaction = comp
+		}
+		if ctx.Window > 0 || ctx.Tokens != nil || ctx.Compaction != nil {
 			u.Context = ctx
 		}
 	}
@@ -1373,7 +1438,7 @@ func (u *Usage) clone() *Usage {
 	if u == nil {
 		return nil
 	}
-	out := &Usage{Limits: append([]UsageLimit(nil), u.Limits...), Background: taskCount(u.Background), Monitors: taskCount(u.Monitors)}
+	out := &Usage{Limits: append([]UsageLimit(nil), u.Limits...), LimitsAsOf: u.LimitsAsOf, Background: taskCount(u.Background), Monitors: taskCount(u.Monitors)}
 	if u.Context != nil {
 		c := *u.Context
 		if c.Tokens != nil {
@@ -1388,11 +1453,40 @@ func (u *Usage) clone() *Usage {
 			v := *c.CacheHit
 			c.CacheHit = &v
 		}
+		if c.Compaction != nil {
+			comp := *c.Compaction
+			if len(comp.Milestones) > 0 {
+				comp.Milestones = append([]int64(nil), comp.Milestones...)
+			} else {
+				comp.Milestones = nil
+			}
+			c.Compaction = &comp
+		}
 		out.Context = &c
 	}
 	if u.Cost != nil {
 		c := *u.Cost
 		out.Cost = &c
+	}
+	return out
+}
+
+func normalizeCompaction(in *UsageCompaction) *UsageCompaction {
+	if in == nil {
+		return nil
+	}
+	out := &UsageCompaction{
+		Soft:            max(in.Soft, 0),
+		Hard:            max(in.Hard, 0),
+		AdvisoryEnabled: in.AdvisoryEnabled,
+	}
+	for _, m := range in.Milestones {
+		if m > 0 {
+			out.Milestones = append(out.Milestones, m)
+		}
+	}
+	if out.Soft == 0 && out.Hard == 0 && len(out.Milestones) == 0 && !out.AdvisoryEnabled {
+		return nil
 	}
 	return out
 }

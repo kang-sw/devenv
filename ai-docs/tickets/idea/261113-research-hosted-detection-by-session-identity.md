@@ -1,5 +1,5 @@
 ---
-title: "Hosted-session detection by session identity instead of process ancestry"
+title: "프로세스 계보 대신 세션 신원 기반 hosted 세션 감지"
 related:
   261112-bug-ws-hosted-windows-cmd-shim-host-pid-mismatch: same symptom family (Windows wrapper between harness and child)
 ---

@@ -70,20 +70,24 @@ type StartSpec struct {
 	// PermissionLevel is the explicit authority of this launch: a lead's
 	// selection, or the level an agent.spawn child was spawned with. Empty
 	// keeps legacy native settings. It does not grant tools; a backend reads
-	// it only where it maps the level to its own sandbox (Codex workers).
+	// it only where it maps the level to its own per-run controls (Codex).
 	PermissionLevel PermissionLevel
 	// RemoveSubagents removes the harness's native subagent tool from the
 	// launch whatever the profile or the user's settings allow, so the
 	// conversation delegates through agent.spawn (RemovesSubagents). A
 	// backend whose harness has no such tool ignores it.
 	RemoveSubagents bool
+	// RecoveredSteers are the unconsumed worker steers persisted before a
+	// holder reattach. A backend may use them to map replayed acknowledgements
+	// back to the runner without persisting backend request ids.
+	RecoveredSteers []string
 }
 
 // LeadSpec is what a lead conversation's process starts with.
 type LeadSpec struct {
 	// DaemonVersion is the running daemon's version, not the plugin starter's.
 	DaemonVersion string
-	// PermissionMode is the permission mode to launch in (claude).
+	// PermissionMode is the native permission mode to launch a lead in.
 	PermissionMode string
 	// PluginIsolation is default (replace ws only) or isolated (bundled only).
 	PluginIsolation string
@@ -377,6 +381,9 @@ type Event struct {
 	// boundaries and user messages itself; a backend never sends
 	// turn_start, turn_end, user, or reset.
 	Live *wslive.Event
+	// LiveCoalescesTurnEnd marks a live status immediately followed by this
+	// mapper's TurnEnd. File-only recovery can persist both in one snapshot.
+	LiveCoalescesTurnEnd bool
 	// ReasoningSummary is a validated lead-only widget projection, never an
 	// extension-supplied lifecycle/usage/key command.
 	ReasoningSummary *wslive.ReasoningSummary
@@ -396,10 +403,19 @@ type Event struct {
 	// it for resume.
 	SessionID string
 	// TurnEnd ends the running turn; TurnError describes a turn that ended
-	// in an error (a refusal, an interrupt).
-	TurnEnd    bool
-	TurnError  string
-	TurnReason string
+	// in an error (a refusal, an interrupt). ModelFailure (with TurnEnd) carries
+	// an in-band API/stream failure that remained at the reply tail through the
+	// end. ModelFailureUpdate is an internal-only change to that terminal-tail
+	// candidate; an empty value clears a candidate after later model output.
+	TurnEnd            bool
+	TurnError          string
+	TurnReason         string
+	ModelFailure       string
+	ModelFailureUpdate *string
+	// ModelActivity is an internal-only signal that a raw stream update arrived
+	// during a turn, carrying the count of currently pending tool calls
+	// (including daemon commands) so the model-wait watchdog can reset or pause.
+	ModelActivity *int
 	// CompactRequested (with TurnEnd): the ending turn carried a successful
 	// compaction lever call (a *__request_compaction tool call whose result
 	// is not an error) and was not interrupted. The runner holds queued

@@ -1182,18 +1182,22 @@
     // Escape closes the popover before anything else hears it (the rail
     // overlay and the drawer would close on it too); in a row menu it first
     // closes the open "move under" list.
+    // The full-permission warning a popover opened closes first, as its
+    // cancel: the popover stays.
     window.addEventListener("keydown", function (e) {
       if (e.key !== "Escape" || !rp.P) return;
       e.preventDefault();
       e.stopPropagation();
+      if (permFullOpen()) { permFullDrop(); return; }
       if (!(rp.P.back && rp.P.back())) railPopClose(true);
     }, true);
-    // A click outside the popover and its + closes it. Capture sees the
-    // target before the popover's own handlers redraw it.
+    // A click outside the popover and its + closes it (the warning it
+    // opened, and the head's permission chip, count as inside). Capture sees
+    // the target before the popover's own handlers redraw it.
     doc.addEventListener("click", function (e) {
       var t = e.target;
       if (!rp.P || !t || !t.closest) return;
-      if (rp.P.el.contains(t) || t.closest(".radd, .rnew, .hbtn, .usage-toggle, .settings-toggle")) return;
+      if (rp.P.el.contains(t) || t.closest(".radd, .rnew, .hbtn, .usage-toggle, .settings-toggle, .pmdlg, .pmhead")) return;
       railPopClose(false);
     }, true);
     // A press inside an iframe never reaches the listener above (the shell's

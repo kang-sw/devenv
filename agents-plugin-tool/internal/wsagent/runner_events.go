@@ -61,7 +61,11 @@ func (c *conv) handle(ev Event) {
 		if !quiet {
 			c.compactEvent(*ev.Live)
 		}
-		c.apply(*ev.Live, quiet)
+		if ev.LiveCoalescesTurnEnd {
+			c.applyCoalesced(*ev.Live, quiet)
+		} else {
+			c.apply(*ev.Live, quiet)
+		}
 		if !quiet && ev.Live.Kind == wslive.KindStatus {
 			c.checkUsageDropCompaction(*ev.Live)
 			if c.canKick() {
@@ -115,6 +119,13 @@ func (c *conv) handle(ev Event) {
 		}
 		c.replayBoundary = c.replayBoundary || c.replaying
 		if !quiet {
+			if c.interceptModelWaitTurnEnd(ev) {
+				return
+			}
+			if override := c.modelWaitTurnError(ev); override != "" {
+				ev.TurnError = override
+			}
+			c.disarmModelWait()
 			// Every turn end lifts an earlier hold; a lever turn arms anew.
 			c.holdForLever(ev.CompactRequested && !c.interruptAsked)
 			c.interruptAsked = false
@@ -124,6 +135,14 @@ func (c *conv) handle(ev Event) {
 		c.endTurn(ev.TurnError, quiet)
 		c.live.summaryNaturalEnd = false
 		c.live.summarySource, c.summaryReason, c.summaryGap = "", "", false
+	case ev.ModelActivity != nil:
+		if !quiet {
+			c.onModelActivity(*ev.ModelActivity)
+		}
+	case ev.ModelFailureUpdate != nil:
+		if !quiet {
+			c.onModelFailure(*ev.ModelFailureUpdate)
+		}
 	case ev.Approval != nil:
 		c.addApproval(*ev.Approval, quiet)
 	case ev.ApprovalDone != "":
@@ -132,8 +151,9 @@ func (c *conv) handle(ev Event) {
 	case ev.PermissionMode != "":
 		if ev.PermissionMode != c.activeMode {
 			c.setStatus(func() { c.activeMode = ev.PermissionMode })
-			if c.rec.Lead && !quiet {
-				if level, _, err := c.r.leadPermission(c.record(), c.dir); err == nil {
+			rec := c.record()
+			if rec.Lead && !quiet {
+				if level, _, err := c.r.leadPermission(rec, c.dir); err == nil {
 					c.permissionNudge(level, false, ev.PermissionMode)
 				}
 			}
@@ -146,7 +166,12 @@ func (c *conv) handle(ev Event) {
 		// that mode on record (agyBypass), so a report leaves it. A flag
 		// left stale by an older writer goes, so that a report of
 		// native default does not revive it without the user.
-		if c.rec.Lead && !quiet && !c.dirtyMode && !c.rec.agyBypass() && ev.PermissionMode != c.rec.PermissionMode && slices.Contains(permissionModes(c.rec.Backend, []map[string]BackendRegistration{c.r.opts.Backends}), ev.PermissionMode) {
+		rec := c.record()
+		// Codex reports its effective defaults even when the launch omitted a
+		// permission choice. Keep that report in activeMode for projection, but
+		// do not turn an observation into a persisted next-launch override.
+		legacyCodexOmission := rec.Backend == BackendCodex && rec.PermissionMode == ""
+		if rec.Lead && !quiet && !c.dirtyMode && !rec.agyBypass() && !legacyCodexOmission && ev.PermissionMode != rec.PermissionMode && slices.Contains(permissionModes(rec.Backend, []map[string]BackendRegistration{c.r.opts.Backends}), ev.PermissionMode) {
 			c.update(func(rec *Record) { rec.PermissionMode, rec.AgyBypass = ev.PermissionMode, false })
 			c.changed(quiet)
 		}
@@ -337,6 +362,9 @@ func (c *conv) endTurn(turnErr string, quiet bool) {
 			status = TurnFailed
 		}
 		c.settleTurn(status, turnErr, c.turnMark)
+		if c.rec.Backend == BackendAgy && c.r.opts.AgyActivity != nil {
+			c.r.opts.AgyActivity()
+		}
 	}
 	if c.replaying {
 		return
@@ -384,6 +412,14 @@ func (c *conv) addApproval(a ApprovalRequest, quiet bool) {
 		}
 	}
 	c.setStatus(func() { c.approvals = append(c.approvals, a) })
+	if !quiet && c.modelWaitArmed {
+		c.stopModelWaitTimer()
+		c.stopModelFailureDrain()
+		if c.modelWaitFailure != "" {
+			c.modelWaitFailureExcluded = true
+		}
+		c.modelWaitFailure = ""
+	}
 	c.checkAction(quiet)
 	c.showApprovals(quiet)
 	if !quiet && !c.rec.Lead && c.r.opts.Backends[c.rec.Backend].WorkerAutoApprove {
@@ -445,6 +481,9 @@ func (c *conv) dropApproval(id string, quiet bool) bool {
 	for i, have := range c.approvals {
 		if have.ID == id {
 			c.setStatus(func() { c.approvals = append(c.approvals[:i:i], c.approvals[i+1:]...) })
+			if !quiet && c.modelWaitArmed && len(c.approvals) == 0 && c.modelWaitPending == 0 {
+				c.resetModelWaitTimer()
+			}
 			c.checkAction(quiet)
 			c.showApprovals(quiet)
 			return true
@@ -599,7 +638,11 @@ func (c *conv) processExited() {
 	c.setStatus(func() {
 		c.proc = nil
 		if c.lastErr == "" {
-			c.lastErr = "the backend process exited"
+			if c.modelWaitFailErr != "" {
+				c.lastErr = c.modelWaitFailErr
+			} else {
+				c.lastErr = "the backend process exited"
+			}
 		}
 	})
 	c.processEnded()
@@ -623,7 +666,12 @@ func (c *conv) processGone() {
 		hp.Detach()
 	}
 	c.setStatus(func() { c.proc = nil })
-	c.update(func(rec *Record) { rec.HolderID, rec.HostPID, rec.HolderSeq = "", 0, 0 })
+	c.update(func(rec *Record) {
+		rec.HolderID, rec.HostPID, rec.HolderSeq = "", 0, 0
+		if !rec.Lead {
+			rec.HandedOffAt = ""
+		}
+	})
 	c.writeRegistration()
 	c.replaying, c.replayAsked = false, false
 	c.interrupted()
@@ -634,10 +682,20 @@ func (c *conv) processGone() {
 // processEnded settles what ends with a process: its turn, its waiting
 // prompts, and what it last reported.
 func (c *conv) processEnded() {
+	// A process loss after retry exhaustion must publish the same visible
+	// diagnostic as TurnEnd before disarming the watchdog. Earlier losses still
+	// restore the failed attempt's saved reply when no final reply followed.
+	if c.modelWaitFailErr != "" && c.modelWaitRetries >= c.modelWaitMaxRetries {
+		c.publishModelWaitExhaustedDiagnostic()
+	} else {
+		c.restoreModelWaitDiagnostic()
+	}
+	c.disarmModelWait()
 	c.stopIdle()
 	hadBgGrace := c.bgGraceTimer != nil
 	c.stopBgGrace()
 	c.wrapHold = false
+	hadTurn := c.turn
 	if c.turn {
 		c.setStatus(func() { c.turn = false })
 		c.apply(wslive.Event{Kind: wslive.KindTurnEnd})
@@ -681,6 +739,9 @@ func (c *conv) processEnded() {
 	c.syncHost(true)
 	c.live.endAgents()
 	c.live.writeSnapshot()
+	if !c.closed && !c.quitting && !hadTurn && !hadBackgroundTasks && !hadBgGrace {
+		c.watched()
+	}
 	c.r.notify(c.rec.ReplyID, c.rec.Root)
 }
 
@@ -704,7 +765,12 @@ func (c *conv) releaseHolder(proc Process) {
 		return
 	}
 	c.seqDirty, c.live.ringDirty = false, false
-	c.update(func(rec *Record) { rec.HolderID, rec.HostPID, rec.HolderSeq = "", 0, 0 })
+	c.update(func(rec *Record) {
+		rec.HolderID, rec.HostPID, rec.HolderSeq = "", 0, 0
+		if !rec.Lead {
+			rec.HandedOffAt = ""
+		}
+	})
 	c.writeRegistration()
 }
 
@@ -833,10 +899,18 @@ func (c *conv) idleNow() bool {
 // running turn when there is one; with no turn they are dropped.
 func (c *conv) checkInterrupt() {
 	recs, err := wsinbox.DrainInterrupt(c.inbox)
-	if err != nil || len(recs) == 0 || !c.turn || c.proc == nil {
+	if err != nil || len(recs) == 0 {
+		return
+	}
+	if c.modelWaitBackoffC != nil {
+		c.cancelModelWaitBackoff()
+		return
+	}
+	if !c.turn || c.proc == nil {
 		return
 	}
 	c.interruptAsked = true
+	c.disarmModelWait()
 	if err := c.proc.Interrupt(); err != nil {
 		fmt.Fprintf(c.r.opts.Log, "agent %s: interrupt: %v\n", c.rec.ReplyID, err)
 		c.stopProcess("")
@@ -883,18 +957,21 @@ func (c *conv) setSettings(model, effort *string) error {
 // backend session. A restart ends the session's background work with the
 // process, so it is the last resort.
 func (c *conv) applySettings() {
-	model, effort, mode, reconcile := c.dirtyModel, c.dirtyEffort, c.dirtyMode, c.reconcileMode
+	model, effort, mode, permission, reconcile := c.dirtyModel, c.dirtyEffort, c.dirtyMode, c.dirtyPermission, c.reconcileMode
 	if c.replaying {
 		return
 	}
-	c.dirtyModel, c.dirtyEffort, c.dirtyMode, c.reconcileMode = false, false, false, false
-	if c.proc == nil || (!model && !effort && !mode) {
+	c.dirtyModel, c.dirtyEffort, c.dirtyMode, c.dirtyPermission, c.reconcileMode = false, false, false, false, false
+	if c.proc == nil || (!model && !effort && !mode && !permission) {
 		return
 	}
 	rec := c.record()
 	restart := false
 	controls := controlsFor(c.proc)
-	if model && controls.SetModel(rec.Model) != nil {
+	if permission && !rec.Lead {
+		restart = true
+	}
+	if model && !restart && controls.SetModel(rec.Model) != nil {
 		restart = true
 	}
 	if effort && !restart && controls.SetEffort(rec.Effort) != nil {

@@ -92,7 +92,7 @@
   function entryInputHTML(input) { return keyedInputHTML(input, ENTRY_SLOT); }
 
   // mergeEntriesRegion applies an entries region event: the title bar (its
-  // counts) and model history are synced, and the entries are merged. A window
+  // counts and model-history source) is synced, and the entries are merged. A window
   // past a gap starts the box over; a box at the bottom (pin) sheds its oldest
   // entries past the cap. Either way the older history is loaded again from
   // what the box then holds.
@@ -119,18 +119,80 @@
     var nbox = src.querySelector(".centries");
     if (!box || !nbox) { el.innerHTML = html; restoreOpen(el); fmtTimes(el); sweepOutImgs(el); mermaid(el); histReset(); return; }
     if (head && nhead) { head.parentNode.replaceChild(nhead, head); fmtTimes(nhead); }
-    var history = el.querySelector(".modelhistory"), nhistory = src.querySelector(".modelhistory");
-    if (history) {
-      if (nhistory) history.parentNode.replaceChild(nhistory, history);
-      else history.parentNode.removeChild(history);
-    } else if (nhistory) box.parentNode.insertBefore(nhistory, box);
-    if (nhistory) { restoreOpen(nhistory); fmtTimes(nhistory); }
     if (gapped(box, nbox)) { resetEntries(box); histReset(); }
     var added = mergeEntries(box, nbox, changed);
     added.forEach(sweepOutImgs);
     mermaid(added);
     if (pin && evictEntries(box)) histReset();
   }
+
+  // Model history is a click-only popover sourced by the entries title bar.
+  // The popover lives outside the swapped region; syncChead calls
+  // modelHistorySync after each entries refresh so an open popover keeps its
+  // state while its source and anchor are replaced.
+  var modelHistoryPop = null, modelHistoryOpen = false;
+  function modelHistoryTrigger() { return doc.querySelector(".modelhistory-trigger"); }
+  function modelHistorySource(btn) {
+    return btn && btn.parentNode && btn.parentNode.querySelector("template.modelhistory-source");
+  }
+  function modelHistoryPlace() {
+    var btn = modelHistoryTrigger();
+    if (!modelHistoryPop || modelHistoryPop.hidden || !btn || !window.WsRail) return;
+    var a = btn.getBoundingClientRect();
+    var at = window.WsRail.popPlace(a, modelHistoryPop.offsetWidth, modelHistoryPop.offsetHeight,
+      root.clientWidth || window.innerWidth, root.clientHeight || window.innerHeight);
+    modelHistoryPop.style.top = at.top + "px";
+    modelHistoryPop.style.left = at.left + "px";
+  }
+  function modelHistoryClose(refocus) {
+    modelHistoryOpen = false;
+    if (modelHistoryPop) modelHistoryPop.hidden = true;
+    var btn = modelHistoryTrigger();
+    if (btn) {
+      btn.setAttribute("aria-expanded", "false");
+      if (refocus) btn.focus();
+    }
+  }
+  function modelHistorySync() {
+    var btn = modelHistoryTrigger(), src = modelHistorySource(btn);
+    if (!btn || !src) {
+      if (modelHistoryPop) modelHistoryPop.hidden = true;
+      return;
+    }
+    btn.setAttribute("aria-expanded", String(!!modelHistoryOpen));
+    if (!modelHistoryOpen) return;
+    if (!modelHistoryPop) {
+      modelHistoryPop = doc.createElement("div");
+      modelHistoryPop.id = "modelhistory-popover";
+      modelHistoryPop.className = "rpop modelhistory-popover";
+      modelHistoryPop.setAttribute("role", "dialog");
+      modelHistoryPop.setAttribute("aria-label", btn.getAttribute("aria-label") || "");
+      doc.body.appendChild(modelHistoryPop);
+    }
+    modelHistoryPop.innerHTML = src.innerHTML;
+    modelHistoryPop.hidden = false;
+    fmtTimes(modelHistoryPop);
+    modelHistoryPlace();
+  }
+  function modelHistoryToggle(btn) {
+    if (modelHistoryOpen) { modelHistoryClose(true); return; }
+    modelHistoryOpen = true;
+    btn.setAttribute("aria-expanded", "true");
+    modelHistorySync();
+  }
+  doc.addEventListener("click", function (e) {
+    var btn = e.target && e.target.closest && e.target.closest(".modelhistory-trigger");
+    if (btn) { e.preventDefault(); modelHistoryToggle(btn); return; }
+    if (modelHistoryOpen && (!modelHistoryPop || !modelHistoryPop.contains(e.target))) modelHistoryClose(false);
+  }, true);
+  window.addEventListener("keydown", function (e) {
+    if (e.key !== "Escape" || !modelHistoryOpen) return;
+    e.preventDefault();
+    e.stopPropagation();
+    modelHistoryClose(true);
+  }, true);
+  window.addEventListener("resize", modelHistoryPlace);
+  doc.addEventListener("scroll", modelHistoryPlace, true);
 
   // Conversation cards navigate only this session's board and validated IDs.
   // The existing card/filter and history owners retain all geometry decisions.
@@ -181,6 +243,9 @@
         var exact = !!target;
         if (!target) target = topic;
         if (unfold) unfold(target);
+        // A target on a docked page not shown (or, in the narrow view, on
+        // the Main Board while a docked page shows) has its page shown first.
+        if (cards && cards.activate) cards.activate(target);
         for (var p = target; p && inBoard(p); p = p.parentNode) if (p.tagName === "DETAILS") p.open = true;
         // loadTarget owns lazy-history positioning, including version folds.
         if (!target.closest(".wb-history")) {
@@ -203,6 +268,12 @@
     }
     step();
   }
+  function effectJumpTo(card, id) {
+    effectJump(card.getAttribute("data-wb-topic"), id, function (found, exact) {
+      var status = card.querySelector(".wbupdate-status");
+      if (status) status.textContent = !found ? wsT("js.whiteboard.jump.missing") : !exact ? wsT("js.whiteboard.jump.elementmissing") : "";
+    });
+  }
   function effectJumpClick(e) {
     var t = e.target, box = entriesBox();
     if (!t || !t.closest || !box || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
@@ -215,14 +286,22 @@
     if (!link && selection && !selection.isCollapsed) return;
     e.preventDefault();
     var row = t.closest(".wbupdate-row[data-wb-element]");
-    var topicID = card.getAttribute("data-wb-topic");
-    var id = link ? link.getAttribute("data-wb-jump") : row ? row.getAttribute("data-wb-element") : topicID;
-    effectJump(topicID, id, function (found, exact) {
-      var status = card.querySelector(".wbupdate-status");
-      if (status) status.textContent = !found ? wsT("js.whiteboard.jump.missing") : !exact ? wsT("js.whiteboard.jump.elementmissing") : "";
-    });
+    var id = link ? link.getAttribute("data-wb-jump") : row ? row.getAttribute("data-wb-element") : card.getAttribute("data-wb-topic");
+    effectJumpTo(card, id);
+  }
+  function effectJumpKey(e) {
+    if ((e.key !== "Enter" && e.key !== " ") || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    var t = e.target, box = entriesBox();
+    if (!t || !t.closest || !box) return;
+    if (t.closest("[data-wb-nav], a, summary, button, input, textarea, select")) return;
+    var row = t.closest(".wbupdate-row[data-wb-element]");
+    var card = row && row.closest(".wbupdate-topic[data-wb-topic]");
+    if (!row || !card || !box.contains(card)) return;
+    e.preventDefault();
+    effectJumpTo(card, row.getAttribute("data-wb-element"));
   }
   doc.addEventListener("click", effectJumpClick);
+  doc.addEventListener("keydown", effectJumpKey);
 
   // User chips and references in committed previews share the card jump owner.
   // Delegation also covers held bubbles and subsequently paged conversation rows.

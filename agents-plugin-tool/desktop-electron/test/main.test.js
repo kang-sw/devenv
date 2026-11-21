@@ -77,6 +77,8 @@ async function fixture(discover = async () => 'http://127.0.0.1:39418/', platfor
           loaded(url.href);
         },
         setZoomFactor: zoom => { this.zoom = zoom; },
+        reload: () => { this.reloads = (this.reloads || 0) + 1; },
+        reloadIgnoringCache: () => { this.forceReloads = (this.forceReloads || 0) + 1; },
         id: renderers.length + 1,
         toggleDevTools: () => { this.devtoolsToggles = (this.devtoolsToggles || 0) + 1; },
         isDevToolsOpened: () => !!this.devtoolsOpen,
@@ -1261,6 +1263,43 @@ test('update bridge: IPC only from the pinned dashboard main frame, status repla
   f.app.emit('will-quit');
   assert.equal(calls.at(-1), 'quit:true');
 });
+test('canary and stable-return IPC: payload-free, pinned to the dashboard main frame, canary signal only when packaged', async () => {
+  const update = require('../update'), original = update.createUpdater;
+  const calls = [];
+  let canary = true;
+  update.createUpdater = () => ({ applyOnLaunch: () => false, applyOnQuit() {}, schedule() {},
+    phase: () => ({ phase: 'none', version: null, skipped: false }), canRestart: () => false,
+    isCanary: () => canary, check: manual => calls.push(`check:${manual}`),
+    checkCanary: (...args) => calls.push(['canary', ...args]), backToStable: (...args) => calls.push(['stable', ...args]) });
+  let f;
+  try { f = await fixture(async () => 'http://127.0.0.1:39418/', 'darwin', { packaged: true }); }
+  finally { update.createUpdater = original; }
+  const wc = f.window.webContents;
+  const from = url => ({ sender: wc, senderFrame: Object.assign(wc.mainFrame, { url }) });
+  const channel = f.ipcMain.handlers['werkschaft:update-channel'];
+  assert.equal(typeof channel, 'function');
+  // Refused: another origin, the bundled connection page, a foreign sender, and a subframe.
+  const subframe = { sender: wc, senderFrame: { url: 'http://127.0.0.1:39418/' } };
+  for (const event of [from('https://example.com/'), from('file:///tmp/connection.html'),
+    { sender: {}, senderFrame: { url: 'http://127.0.0.1:39418/' } }, subframe]) {
+    f.ipcMain.emit('werkschaft:update-check-canary', event, 'https://evil.test/x.zip');
+    f.ipcMain.emit('werkschaft:update-back-to-stable', event, '0.0.1');
+    assert.deepEqual(await channel(event), { canary: false });
+  }
+  assert.deepEqual(calls, []);
+  // Admitted from the pinned main frame; any renderer argument is dropped.
+  f.ipcMain.emit('werkschaft:update-check-canary', from('http://127.0.0.1:39418/s/x'), 'https://evil.test/x.zip');
+  f.ipcMain.emit('werkschaft:update-back-to-stable', from('http://127.0.0.1:39418/'), '0.0.1', { allowOlder: true });
+  assert.deepEqual(calls, [['canary'], ['stable']]);
+  assert.deepEqual(await channel(from('http://127.0.0.1:39418/')), { canary: true, version: '0.1.0' });
+  // A stable relaunch, or an unpackaged dev run that cannot swap itself, never offers Back to stable.
+  canary = false;
+  assert.deepEqual(await channel(from('http://127.0.0.1:39418/')), { canary: false, version: '0.1.0' });
+  canary = true;
+  f.app.isPackaged = false;
+  assert.deepEqual(await channel(from('http://127.0.0.1:39418/')), { canary: false, version: '0.1.0' });
+  assert.equal(calls.some(call => call === 'check:true'), false, 'channel actions never run the stable check');
+});
 test('a stage applied at launch quits before any window and never registers the quit apply', async () => {
   const update = require('../update'), original = update.createUpdater;
   let quitApplied = false;
@@ -1388,4 +1427,30 @@ test('explicit native menu click copies a login link and sends only success; fai
   assert.equal(f.copied.length, 1);
   assert.equal(sent.length, 1);
   assert.equal(f.ipcMain.listenerCount('werkschaft:login-copy'), 0, 'renderer cannot request a clipboard write');
+});
+test('View Reload and Force Reload target the dashboard webContents on Windows (BaseWindow) and macOS', async () => {
+  const win = await fixture(undefined, 'win32');
+  const [dashboard, bar] = win.views;
+  assert.equal(win.window.constructor, win.Base);
+  assert.equal(win.menus.reload.accelerator, 'F5');
+  assert.equal(win.menus.force_reload.accelerator, 'Ctrl+Shift+R');
+  // Electron passes focusedWindow=undefined for a BaseWindow hosting a WebContentsView.
+  win.menus.reload.click({}, undefined);
+  assert.equal(dashboard.reloads, 1);
+  assert.equal(bar.reloads, undefined);
+  win.menus.force_reload.click({}, undefined);
+  assert.equal(dashboard.forceReloads, 1);
+  assert.equal(bar.forceReloads, undefined);
+  // Safe no-op once the dashboard webContents is destroyed.
+  dashboard.destroyed = true;
+  win.menus.reload.click({}, undefined);
+  win.menus.force_reload.click({}, undefined);
+  assert.equal(dashboard.reloads, 1);
+  assert.equal(dashboard.forceReloads, 1);
+
+  const mac = await fixture(undefined, 'darwin');
+  mac.menus.reload.click({}, mac.window);
+  mac.menus.force_reload.click({}, undefined);
+  assert.equal(mac.window.reloads, 1);
+  assert.equal(mac.window.forceReloads, 1);
 });

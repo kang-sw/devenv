@@ -1,5 +1,5 @@
 ---
-title: "Dashboard fixture inherits real HOME and launches a real Codex child during plan-usage handling"
+title: "dashboard 픽스처가 실제 HOME을 상속하고 plan-usage 처리 중 실제 Codex 자식을 실행하는 문제"
 related:
   261115-research-ws-effects-browser-unexpected-codex-child: "adjacent tracked process receipt and fixture-isolation evidence"
   261113-feat-ws-dashboard-rail-usage-gutter: "the landed dashboard plan-usage source chain"

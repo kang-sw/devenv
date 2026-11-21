@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/kang-sw/devenv/internal/wslive"
 )
 
 func treeTestRow(id, text, children string) string {
@@ -88,5 +90,46 @@ func TestTreeRowsPeersAndEmpty(t *testing.T) {
 	}
 	if rows := splitTreeRows(""); rows == nil || len(rows.order) != 0 {
 		t.Fatal("empty fallback baseline unavailable")
+	}
+}
+
+func TestTreeRowsPreservesSplitWithHUDDataCarrier(t *testing.T) {
+	now := testNow
+	sessions := map[string]Session{
+		"self": liveSession("self", "/p", now),
+		"r1":   liveSession("r1", "/p", now),
+	}
+	snaps := map[string]*wslive.Snapshot{
+		"r1": liveSnap(now, wslive.Lead{}, wslive.Agent{ID: "l1", Label: "linked-1", Status: wslive.StatusRunning,
+			Activity: wslive.Activity{Caption: "linked </script> task"}}),
+	}
+	build := func(caption string) string {
+		snap := liveSnap(now, wslive.Lead{},
+			wslive.Agent{ID: "a1", Label: "worker-1", ReplyID: "r1", Status: wslive.StatusRunning,
+				Activity: wslive.Activity{Caption: caption, Permission: &wslive.Permission{ToolName: "bash", ArgsPreview: "echo hi"}}},
+			wslive.Agent{ID: "a2", Label: "worker-2", Status: wslive.StatusDone, Alive: true},
+		)
+		v := buildSessionView(pageInputs{Session: sessions["self"], Snapshot: snap, Now: now, Lookup: lookupOf(sessions, snaps)})
+		set, err := renderSessionRegions(v, newEntryCache())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(set[regionTree].HTML)
+	}
+	firstHTML := build("step </script> one")
+	if strings.Contains(firstHTML, "linked </script> task") {
+		t.Fatalf("unescaped </script> in HUD JSON:\n%s", firstHTML)
+	}
+	first := splitTreeRows(firstHTML)
+	if first == nil || !reflect.DeepEqual(first.order, []string{"agent-lead", "agent-a1", "agent-a2"}) {
+		t.Fatalf("splitTreeRows failed with HUD data carrier: %+v\n%s", first, firstHTML)
+	}
+	nextHTML := build("step two")
+	next := splitTreeRows(nextHTML)
+	state := keyedRowState{name: regionTree, previous: first, initialized: true}
+	name, data := state.event(newRegion(nextHTML), next)
+	patch, ok := data.(keyedRowsEvent)
+	if name != "tree-rows" || !ok || len(patch.Rows) != 1 || patch.Rows[0].Key != "agent-a1" {
+		t.Fatalf("caption-only edit did not produce single tree-rows patch: name=%q data=%+v", name, data)
 	}
 }

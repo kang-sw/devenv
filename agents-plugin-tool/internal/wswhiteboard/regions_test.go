@@ -9,30 +9,16 @@ import (
 	"github.com/kang-sw/devenv/internal/wsi18n"
 )
 
-// TestRenderRegionsMatchThePage pins the dashboard's reuse contract: the
-// board and panel fragments are exactly what the full page renders for the
-// same view, so a served page cannot drift from the static one. A topic body
-// is one difference, framed in the regions
-// (TestServedTopicBodyRendersInASandboxedFrame), so this board has none; the
-// topic bar's count chips are the other, bulk-answer buttons in the regions
-// (TestTopicCountChipsAreBulkButtonsOnTheDashboard), which the comparison
-// turns back into the page's plain counts (StaticCountChips).
-func TestRenderRegionsMatchThePage(t *testing.T) {
+// TestRenderRegionsContract pins the renderer's production outputs: board and
+// panel fragments, counts, and the shared assets needed to host them.
+func TestRenderRegionsContract(t *testing.T) {
 	view := sampleView(LayoutFull)
-	page := render(t, view)
 	regions, err := RenderRegions(view)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if regions.Board == "" || regions.Panels == "" {
 		t.Fatalf("empty regions: %+v", regions)
-	}
-	board := StaticCountChips(string(regions.Board))
-	if !strings.Contains(page, board) {
-		t.Errorf("the page does not hold the board fragment:\n%.400s", regions.Board)
-	}
-	if !strings.Contains(page, string(regions.Panels)) {
-		t.Errorf("the page does not hold the panels fragment:\n%.400s", regions.Panels)
 	}
 	if regions.CountPolicy == 0 {
 		t.Errorf("counts not carried: %+v", regions)
@@ -73,8 +59,7 @@ func TestFileTextRendersFileTargetsAsPathText(t *testing.T) {
 			"![diagram](shots/a.png)\n\n" +
 			"<file:///abs/notes.md> and [abs](/abs/b.md) and [web](https://example.com/) and [anchor](#item-1)"}}
 	text := func(p string) string { return "REL:" + strings.TrimPrefix(p, "/") }
-	out := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r", FileText: text,
-		FileLink: func(p string) string { return "MUST-NOT-USE/" + p }}))
+	out := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r", FileText: text}))
 	wantAll(t, out,
 		`the plan <code class="fpath">REL:ai-docs/plan.md</code>`,
 		`<code class="fpath">REL:ai-docs/x.md</code>`,
@@ -244,29 +229,14 @@ func TestFileActionsZeroKeepsPathText(t *testing.T) {
 	wantNone(t, markup(plain), "data-wl")
 }
 
-// TestDiskBoardKeepsFileLinks: a board written to disk (FileLink, no
-// FileText) keeps its file: and relative links and marks none of them.
-func TestDiskBoardKeepsFileLinks(t *testing.T) {
-	st := &State{Seq: 2, SettleSeq: 1}
-	st.Items = []Item{{ID: 1, Class: ClassPolicy, Topic: "t", Title: "files", Status: StatusOpen, Options: []string{"a", "b"},
-		Rationale: "see [the plan](ai-docs/plan.md) and [abs](file:///abs/b.md) and [web](https://example.com/)"}}
-	out := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r",
-		FileLink:    func(p string) string { return "file://" + p },
-		FileActions: func(string) FileAction { return FileAction{Href: "/s/r/file?path=x", Abs: "/x"} }}))
-	wantAll(t, out, `<a href="file://ai-docs/plan.md">the plan</a>`, `<a href="file:///abs/b.md">abs</a>`)
-	wantNone(t, markup(out), "data-wl", "/s/r/file")
-}
-
-// markup is page without its script elements: the viewer script names
-// data-wl links and data: image sources it reads, which no markup holds.
 func markup(page string) string {
 	return scriptElement.ReplaceAllString(page, "")
 }
 
 var scriptElement = regexp.MustCompile(`(?s)<script>.*?</script>`)
 
-// frameDocs returns the document (data-srcdoc) of every topic-body frame in board,
-// keyed by topic name, unescaped as a browser reads the attribute.
+// frameDocs returns the document (data-srcdoc) of every topic-body frame in
+// board, keyed by topic name, unescaped as a browser reads the attribute.
 func frameDocs(t *testing.T, board string) map[string]string {
 	t.Helper()
 	out := map[string]string{}
@@ -283,13 +253,6 @@ func frameDocs(t *testing.T, board string) map[string]string {
 	return out
 }
 
-// TestServedTopicBodyRendersInASandboxedFrame pins the served page's body
-// trust: RenderRegions puts a body's HTML, scripts included, in a srcdoc
-// frame with allow-scripts but never allow-same-origin, so none of it runs
-// in the daemon's origin, and the frame document links the page stylesheet
-// (the theme variables) and the frame script as shared hashed files
-// (FrameAsset), and carries the body's own markup. The disk page keeps
-// rendering the body inline.
 func TestServedTopicBodyRendersInASandboxedFrame(t *testing.T) {
 	const doc = "**plan**\n\n<canvas id=\"c\" width=\"40\" height=\"20\"></canvas>\n<script>\nfetch('/s/r/message', {method: 'POST'});\n</script>\n\nSee {{1}}"
 	st := &State{Seq: 2, Topics: []TopicDoc{{Name: "doc", Body: doc, Changed: 2}}, Items: []Item{{ID: 1, Class: ClassPolicy, Topic: "t", Title: "x", Status: StatusOpen, Options: []string{"a", "b"}}}}
@@ -326,11 +289,6 @@ func TestServedTopicBodyRendersInASandboxedFrame(t *testing.T) {
 	}
 	wantAll(t, string(css), "--wb-bg:", frameCSS)
 
-	page := render(t, view)
-	wantAll(t, page, `<div class="doc-body md"><p><strong>plan</strong></p>`, "fetch('/s/r/message'")
-	// The shared panel comparison script references srcdoc, but the disk
-	// page must render neither a frame nor a framed-document placeholder.
-	wantNone(t, markup(page), "<iframe", " srcdoc=", " data-srcdoc=")
 }
 
 // TestServedBoardFramesEveryBodySeparately: one frame per body, each carrying
@@ -418,7 +376,7 @@ func TestServedBoardFramesArePlaceholders(t *testing.T) {
 
 // TestFramedBodyImagesTakeDocImageSrc pins where DocImageSrc applies: a file
 // image in a framed body takes it, an empty result relays ImageSrc through
-// the host, and an item's image and the disk page's body keep ImageSrc.
+// the host, and an item's image keeps ImageSrc.
 func TestFramedBodyImagesTakeDocImageSrc(t *testing.T) {
 	st := &State{Seq: 2, Topics: []TopicDoc{{Name: "doc", Body: "![a](a.png) ![big](big.png)", Changed: 2}},
 		Items: []Item{{ID: 1, Class: ClassPolicy, Topic: "t", Title: "x", Status: StatusOpen, Options: []string{"a", "b"}, Rationale: "![item](a.png)"}}}
@@ -441,10 +399,6 @@ func TestFramedBodyImagesTakeDocImageSrc(t *testing.T) {
 	wantAll(t, string(regions.Board), `data-relay="/route/big.png" data-sandbox=`)
 	wantAll(t, string(regions.Board), `<img src="/route/a.png" alt="item"/>`)
 	wantNone(t, string(regions.Board), `src="data:image/png;base64,QUJD" alt="item"`)
-
-	page := render(t, BuildView(st, in))
-	wantNone(t, markup(page), "data:image")
-	wantAll(t, page, `<img src="/route/a.png" alt="a">`)
 
 	// Without DocImageSrc the frame's images take ImageSrc.
 	in.DocImageSrc = nil
@@ -496,13 +450,9 @@ func TestRenderRegionsMermaidInBodyAndItems(t *testing.T) {
 	}
 }
 
-// TestImageViewerScriptHooks pins where the image viewer runs: the standalone
-// page carries it (and the SVG helpers it shares with the frames) with its
-// overlay styles and icons, a served page's topic-body frame carries the
-// posting side, and the dashboard reuses the script once through PageAssets.
+// TestImageViewerScriptHooks pins the frame posting side and the shared host
+// assets used by the daemon page.
 func TestImageViewerScriptHooks(t *testing.T) {
-	full := render(t, sampleView(LayoutFull))
-	wantAll(t, full, `wbv-stage`, `function wbFlattenSvg(`, `role", "dialog"`, `aria-modal`, `.wbv-stage`, `id="i-zoom-in"`, `id="i-ext"`)
 	st := &State{Seq: 2, Topics: []TopicDoc{{Name: "doc", Body: "![a](a.png)", Changed: 2}}}
 	regions, err := RenderRegions(BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
 	if err != nil {
@@ -518,7 +468,9 @@ func TestImageViewerScriptHooks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantAll(t, string(shared.ViewerScript), `function wbFlattenSvg(`, `wbviewerclose`, `message`)
+	wantAll(t, string(shared.ViewerScript), `wbv-stage`, `function wbFlattenSvg(`, `role", "dialog"`, `aria-modal`, `wbviewerclose`, `message`)
+	wantAll(t, string(shared.CSS), `.wbv-stage`)
+	wantAll(t, string(shared.Sprite), `id="i-zoom-in"`, `id="i-ext"`)
 	wantNone(t, string(shared.FormScript), `wbFlattenSvg`)
 }
 
@@ -529,9 +481,8 @@ func TestImageViewerScriptHooks(t *testing.T) {
 // FileActions is marked data-img alone. A framed topic body never loads it
 // itself: its image stays path text with a copy-only link, marked data-relay
 // with the Href, and the frame element lists that Href as its own data-relay
-// for the host's relay; a link to it stays copy-only. An unframed body (the
-// page written to disk) takes no relay. An Href that is not a daemon path is
-// dropped, leaving the path text unmarked.
+// for the host's relay; a link to it stays copy-only. An Href that is not a
+// daemon path is dropped, leaving the path text unmarked.
 func TestOutsideImageServesItemsAndRelaysFramedBodyImages(t *testing.T) {
 	const md = "![out](/x/out.png) [lnk](/x/out.png) ![bad](/x/bad.png) [in](shots/a.png)"
 	st := &State{Seq: 2, Topics: []TopicDoc{{Name: "doc", Body: md, Changed: 2}},
@@ -583,11 +534,6 @@ func TestOutsideImageServesItemsAndRelaysFramedBodyImages(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantAll(t, string(regions.Board), `data-doc="topic:doc" data-doc-key="topic:doc" data-topic="doc" data-relay="/s/r/image?path=/x/out.png" data-sandbox=`, `data-doc="topic:plain" data-doc-key="topic:plain" data-topic="plain" data-sandbox=`)
-
-	// An unframed body (the page written to disk's renderer) takes neither
-	// the image nor a relay.
-	page := render(t, BuildView(&State{Seq: 2, Topics: st.Topics}, in))
-	wantNone(t, markup(page), "data-out", "/s/r/image", "data-relay")
 }
 
 // TestTopicFrameCarriesTheCopyStrings: a topic-body frame cannot reach the

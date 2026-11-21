@@ -1,12 +1,12 @@
-// args: page.html [shots-dir]. The approved panel-first history: write order,
+// args: page-url [shots-dir]. The approved panel-first history: write order,
 // an earlier version folded in place and expandable with its own payload,
 // the link menu's latest/exact copy targets, and #eN / #pN arrival.
 const assert = require('node:assert/strict');
 const path = require('node:path');
-const { pathToFileURL } = require('node:url');
 const { chromium } = require(process.env.WS_PLAYWRIGHT_MODULE);
-const url = pathToFileURL(process.argv[2]).href, shots = process.argv[3] || '';
+const url = process.argv[2], shots = process.argv[3] || '';
 const topic = '.topic[data-topic="auth-profile"]';
+const errors = [];
 async function shot(p, name) {
   if (!shots) return;
   await p.mouse.move(0, 0); // no hover band in a capture
@@ -14,6 +14,39 @@ async function shot(p, name) {
 }
 async function open(p, hash = '') {
   await p.goto(url + hash);
+  // The dashboard mounts body frames and sizes them from their messages.
+  await p.evaluate(() => {
+    function mount(root) {
+      root.querySelectorAll('div.doc-frame[data-srcdoc]').forEach(p => {
+        for (let n = p.parentElement; n; n = n.parentElement) if (n.tagName === 'DETAILS' && !n.open) return;
+        const f = document.createElement('iframe');
+        for (const a of p.attributes) if (a.name !== 'data-sandbox') f.setAttribute(a.name, a.value);
+        f.setAttribute('sandbox', p.dataset.sandbox);
+        f.srcdoc = p.dataset.srcdoc;
+        p.replaceWith(f);
+      });
+    }
+    const previous = window.wbBindBoard;
+    window.wbBindBoard = root => { previous(root); mount(root); };
+    document.addEventListener('toggle', e => { if (e.target.open) mount(e.target); }, true);
+    window.addEventListener('message', e => {
+      if (!e.data || e.data.wbDoc !== 'height') return;
+      const f = [...document.querySelectorAll('iframe.doc-frame')].find(f => f.contentWindow === e.source);
+      if (f) f.style.height = e.data.height + 'px';
+    });
+    mount(document);
+    // The dashboard owns fragment routing; exercise its shared loader here.
+    document.addEventListener('click', e => {
+      const a = e.target.closest('a[href^="#"]');
+      if (!a) return;
+      const id = a.getAttribute('href').slice(1);
+      if (!/^(?:e|p)[1-9][0-9]*$/.test(id)) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      window.wbHistory.loadTarget(document, id);
+    }, true);
+  });
+  if (hash) await p.evaluate(id => window.wbHistory.loadTarget(document, id), hash.slice(1));
   await p.waitForTimeout(500);
   // Copying goes through execCommand; record what it would copy.
   await p.evaluate(() => {
@@ -35,9 +68,11 @@ const rows = p => p.evaluate(sel => [...document.querySelector(sel).querySelecto
   open: !!(a.querySelector(':scope > .entry-panel') || {}).open,
 })), topic);
 const menu = p => p.evaluate(() => [...document.querySelectorAll('.pfmenu .pfmi')].map(b => b.textContent.replace(/\s+/g, ' ').trim()));
-// A new tab each time: the file page restores its own folds per tab.
+// A new tab each time: the page restores its own folds per tab.
 async function tab(b, width) {
-  return b.newPage({ viewport: { width, height: 900 }, colorScheme: 'dark' });
+  const p = await b.newPage({ viewport: { width, height: 900 }, colorScheme: 'dark' });
+  p.on('pageerror', e => errors.push(e.message));
+  return p;
 }
 (async () => {
   const b = await chromium.launch();
@@ -70,8 +105,9 @@ async function tab(b, width) {
       await p.waitForTimeout(200);
       const old = await p.evaluate(id => {
         const a = document.getElementById(id), d = a.querySelector('.entry-panel');
-        return { open: d.open, note: a.querySelector('.pfoldnote').textContent.replace(/\s+/g, ' ').trim(), body: a.querySelector('.entry-body').innerText };
+        return { open: d.open, note: a.querySelector('.pfoldnote').textContent.replace(/\s+/g, ' ').trim() };
       }, v1.id);
+      old.body = await p.frameLocator(`#${v1.id} iframe.doc-frame`).locator('.doc-body').innerText();
       assert(old.open && old.note === '이전 버전 v1 · 09:05의 내용입니다. 최신은 v2 · 09:55 ↓' && old.body.includes('생성 UI: 대기'), JSON.stringify(old));
       await shot(p, `mixed-expanded-dark-${width}`);
       await p.locator(`#${v1.id} .entry-recap`).click();
@@ -81,7 +117,7 @@ async function tab(b, width) {
       assert.deepEqual(await menu(p), ['최신 패널 #p1항상 가장 새 버전으로 열림 · 지금 v2', `이 버전 #${v2.id}v2 · 09:55 그대로 열림`]);
       await shot(p, `links-latest-dark-${width}`);
       await p.locator('.pfmenu .pfmi').first().click();
-      assert((await p.evaluate(() => window.copied)).endsWith('.html#p1'));
+      assert((await p.evaluate(() => window.copied)).endsWith('#p1'));
       assert.equal(await p.locator('.pfmenu .pfmi .pfd').first().textContent(), '복사됨');
       await p.waitForTimeout(900);
       assert.equal(await p.locator('.pfmenu').count(), 0, 'the menu closes after copying');
@@ -89,7 +125,7 @@ async function tab(b, width) {
       assert.deepEqual(await menu(p), ['최신 패널 #p1지금은 v2 · 09:55가 열림', `이 버전 #${v1.id}v1 · 09:05 그대로 열림`]);
       await shot(p, `links-old-dark-${width}`);
       await p.locator('.pfmenu .pfmi').nth(1).click();
-      assert((await p.evaluate(() => window.copied)).endsWith('.html#' + v1.id));
+      assert((await p.evaluate(() => window.copied)).endsWith('#' + v1.id));
       assert.equal((await rows(p)).find(r => r.id === v1.id).open, false, 'the link button does not toggle its panel');
       await p.locator(`#${v1.id} .pflink`).click();
       await p.keyboard.press('Escape');
@@ -116,6 +152,7 @@ async function tab(b, width) {
       assert.equal(await p.evaluate(id => document.getElementById(id).querySelector('.entry-panel').open, v1.id), true, 'the previous-version link opens it');
       await p.close();
     }
+    assert.deepEqual(errors, [], 'browser script errors');
     console.log('ok');
   } finally { await b.close(); }
 })().catch(e => { console.error(e); process.exit(1); });

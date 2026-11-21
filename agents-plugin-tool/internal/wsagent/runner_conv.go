@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsconfig"
@@ -16,9 +17,10 @@ import (
 )
 
 // conv is one open conversation. Its loop goroutine owns the process and
-// every write but Send's inbox write; other goroutines read through state(),
-// act through do(), and tell the loop of an inbox change through
-// signalInbox().
+// every conversation write but Send's inbox write; the runner heartbeat
+// sweep may refresh only this conversation's registration heartbeat. Other
+// goroutines read through state(), act through do(), and tell the loop of an
+// inbox change through signalInbox().
 type conv struct {
 	r             *Runner
 	dir           string
@@ -59,6 +61,10 @@ type conv struct {
 	monitors   *int
 	// actionNeeded is State.ActionNeeded.
 	actionNeeded string
+	// Worker permission projection is transient. Explicit selection lives in
+	// permission.json; a legacy-derived value is recomputed at each launch.
+	workerPermissionLevel  PermissionLevel
+	workerPermissionSource string
 	// failure and mcpBroken are State.Failure and State.MCPBroken.
 	failure   *wslive.Notice
 	mcpBroken []string
@@ -84,21 +90,52 @@ type conv struct {
 	compactPrevTokens, compactPrevWindow                                         int64
 	compactGen                                                                   uint64
 	compactLoaded                                                                bool
-	compactUsageFresh, compactAdvised, compactHardIssued, compactAdvisoryEnabled bool
-	compactAwaitTurn                                                             bool
+	compactUsageFresh, compactAdvised, compactM1Issued, compactM2Issued, compactHardIssued, compactAdvisoryEnabled bool
+	compactAwaitTurn                                                                                               bool
 
-	// loop-owned.
+	// Agy model-wait watchdog state (loop-owned, in-memory only).
+	modelWaitTimeout            time.Duration
+	modelWaitMaxRetries         int
+	modelWaitArmed              bool
+	modelWaitRetries            int
+	modelWaitPending            int
+	modelWaitCancelling         bool
+	modelWaitFailErr            string
+	modelWaitDiagnostic         string
+	modelWaitExhaustedPublished bool
+	modelWaitFailureClasses     []string
+	modelWaitFailureExcluded    bool
+	modelWaitC                  <-chan time.Time
+	modelWaitStop               func()
+	modelWaitFailure            string
+	modelWaitDrainC             <-chan time.Time
+	modelWaitDrainStop          func()
+	modelWaitCancelC            <-chan time.Time
+	modelWaitCancelStop         func()
+	modelWaitBackoffC           <-chan time.Time
+	modelWaitBackoffStop        func()
+	modelWaitBackoffFailure     string
+	// modelWaitBackoffFence is the only model-wait field shared with Send:
+	// pending -> cancelled lets a successful inbox write win before it
+	// returns; pending -> firing commits the automatic continue instead.
+	modelWaitBackoffFence atomic.Uint32
+
+	// loop-owned, except registration timing below.
 	events       <-chan Event
 	idle         *time.Timer
 	idleAfter    time.Duration
 	bgGraceTimer *time.Timer
-	dirtyModel   bool
-	dirtyEffort bool
-	dirtyMode   bool
+	dirtyModel      bool
+	dirtyEffort     bool
+	dirtyMode       bool
+	dirtyPermission bool
 	// reconcileMode marks replay-reconstructed intent, not a new user setting.
 	// Failed reconciliation is advisory; it must not kill an unenforceable lead.
 	reconcileMode bool
-	lastReg       time.Time
+	// regMu is leaf-only: it guards the timestamp in memory and is never held
+	// across a registration lock or file I/O.
+	regMu   sync.Mutex
+	lastReg time.Time
 
 	// A lead's or spawned child's own, loop-owned. mailC (one slot) tells
 	// the loop the mailbox may hold mail (signalMail); stopMail ends the
@@ -116,8 +153,12 @@ type conv struct {
 	// foreignRow is set once the session's row was found to be a terminal
 	// harness's (lockRow, checkRow); the loop then lets the session go
 	// (settle).
-	spawning   bool
-	foreignRow bool
+	spawning bool
+	// foreignRow is monotonic for this conversation generation. rowHeld is an
+	// in-memory hint that lets the heartbeat sweep skip a row whose ordinary
+	// owner already holds its flock, without touching the lock file.
+	foreignRow atomic.Bool
+	rowHeld    atomic.Int32
 	// replaying is set from a rejoin of the holder's process (reattach)
 	// until its replay ends: no turn is submitted meanwhile, since the
 	// replay is what tells whether one runs.
@@ -169,10 +210,13 @@ type conv struct {
 	mcpRestarted map[string]bool
 	// mcpStale is a rejoined process whose ws-mcp route (Record.MCPURL)
 	// this daemon does not serve; it restarts at the first idle point.
-	mcpStale      bool
-	mcpChecking   bool
-	mcpAgain      bool
-	mcpAgainNames []string
+	mcpStale bool
+	// Backend-filtered hello environment captured at attach, before token restore.
+	workerMCPEnv   []string
+	workerRetiring bool // validated downgrade retirement retries before replay
+	mcpChecking    bool
+	mcpAgain       bool
+	mcpAgainNames  []string
 	// retry is the API request retry under way; alerted that the running
 	// turn brought a typed failure, so its end clears none.
 	retry   *wslive.Retry
@@ -184,6 +228,10 @@ type conv struct {
 	// systemPrompt is agent.spawn's system prompt (Record.SystemPrompt),
 	// read once from the session directory; loop-owned.
 	systemPrompt string
+	// ambient is the fully rendered hosted-lead turn suffix. It is resolved
+	// at conversation creation/restoration and refreshed by config.tune,
+	// never by the send path.
+	ambient string
 	// expiring is set while a child-agent-waiting expiry is dispatched
 	// (expireIfDue) and not yet decided; loop-owned.
 	expiring bool
@@ -191,6 +239,10 @@ type conv struct {
 	// permission admission (childAdmission): the input stays, and the
 	// child counts as asleep. Under mu.
 	wakeRefused bool
+	// spawnPending is true from registration in r.convs until spawned()'s
+	// first Send (or close), so awakeLocked counts a newly registered spawn
+	// with no gap after pendingSpawns handoff. Under mu.
+	spawnPending bool
 
 	// Turn settles (spawn.go). sends counts Runner.Send's messages and
 	// settled is the last settled turn, settleC closed and replaced at each
@@ -390,13 +442,18 @@ func (c *conv) steerMail(text string) bool {
 		c.apply(*wakeEvent("mail", "mailbox", "", text).Live)
 		return true
 	}
+	// Persist before the holder write. The child can accept the steer and
+	// outlive this daemon before its acknowledgement reaches the runner.
+	c.steerSeq++
+	seq := c.steerSeq
+	c.steered = append(c.steered, steeredReport{Text: text, Seq: seq})
+	c.saveSteered()
 	if err := ctl.reports.Steer(text); err != nil {
+		c.steered = slices.DeleteFunc(c.steered, func(s steeredReport) bool { return s.Seq == seq })
+		c.saveSteered()
 		fmt.Fprintf(c.r.opts.Log, "agent %s: steer a mail: %v\n", c.rec.ReplyID, err)
 		return false
 	}
-	c.steerSeq++
-	c.steered = append(c.steered, steeredReport{Text: text, Seq: c.steerSeq})
-	c.saveSteered()
 	c.apply(*wakeEvent("mail", "mailbox", "", text).Live)
 	c.changed(false)
 	return true
@@ -406,6 +463,9 @@ func (c *conv) steerMail(text string) bool {
 // messages, starting the process when needed (kick). It runs in the loop.
 func (c *conv) inboxChanged() {
 	c.refreshHeld()
+	if c.modelWaitBackoffC != nil && c.held > 0 {
+		c.cancelModelWaitBackoff()
+	}
 	c.checkInterrupt()
 	c.steer()
 	c.kick()
@@ -456,6 +516,8 @@ func (c *conv) loop() {
 	defer c.live.closeSlot()
 	defer func() {
 		c.stopCompactWatchdog()
+		c.stopModelWaitTimer()
+		c.stopModelWaitBackoff()
 		if c.spawnTimer != nil {
 			c.spawnTimer.Stop()
 		}
@@ -486,9 +548,13 @@ func (c *conv) loop() {
 		return
 	}
 	for {
-		var idleC, actionC, leverC, compactC, spawnC, bgGraceC <-chan time.Time
+		var idleC, actionC, leverC, compactC, modelWaitC, modelWaitDrainC, modelWaitCancelC, modelWaitBackoffC, spawnC, bgGraceC <-chan time.Time
 		leverC = c.leverC
 		compactC = c.compactC
+		modelWaitC = c.modelWaitC
+		modelWaitDrainC = c.modelWaitDrainC
+		modelWaitCancelC = c.modelWaitCancelC
+		modelWaitBackoffC = c.modelWaitBackoffC
 		if c.spawnTimer != nil {
 			spawnC = c.spawnTimer.C
 		}
@@ -559,19 +625,16 @@ func (c *conv) loop() {
 			}
 		case <-compactC:
 			c.compactTimedOut()
+		case <-modelWaitC:
+			c.modelWaitTimedOut()
+		case <-modelWaitDrainC:
+			c.modelFailureDrainTimedOut()
+		case <-modelWaitCancelC:
+			c.modelWaitCancelTimedOut()
+		case <-modelWaitBackoffC:
+			c.modelWaitBackoffTimedOut()
 		case <-beat.C:
-			c.live.heartbeatSnapshot()
-			c.persistSeq()
-			if c.replaying {
-				// A holder that attached late (a rescan) is found here.
-				c.checkReattach()
-			}
-			if c.r.opts.Now().Sub(c.lastReg) >= wsdashboard.HeartbeatInterval {
-				c.writeRegistration()
-			} else {
-				c.checkRow()
-			}
-			c.expireIfDue()
+			c.heartbeat()
 		case <-c.r.quit:
 			c.letGo()
 			// The watch's listening marker names this process: left behind,
@@ -587,11 +650,28 @@ func (c *conv) loop() {
 	}
 }
 
+func (c *conv) heartbeat() {
+	registrationDue := c.regDue(c.r.opts.Now())
+	if registrationDue {
+		c.writeRegistration()
+	}
+	c.live.heartbeatSnapshot()
+	c.persistSeq()
+	if c.replaying {
+		// A holder that attached late (a rescan) is found here.
+		c.checkReattach()
+	}
+	if !registrationDue {
+		c.checkRow()
+	}
+	c.expireIfDue()
+}
+
 // settle follows each step of the loop: a session whose row a terminal
 // harness took is let go (release), and it reports whether the loop ends
 // (the conversation closed, or was let go), having stopped the mail watch.
 func (c *conv) settle() bool {
-	if c.foreignRow && !c.closed {
+	if c.isForeign() && !c.closed {
 		c.release()
 	}
 	if !c.closed {
@@ -655,12 +735,13 @@ func (c *conv) stateWithKeyCheck(checkKey bool) State {
 	}
 	if c.closed {
 		st.Status, st.ClosedAt = StatusClosed, c.rec.ClosedAt
-		if c.rec.ClosedAt == "" && c.rec.HandedOffAt != "" {
+		if c.rec.ClosedAt == "" && c.rec.handedOff() {
 			st.Status, st.HandedOffAt = StatusHandedOff, c.rec.HandedOffAt
 			st.ResumeCommand = resumeCommand(c.rec, c.dir)
 		}
 	}
 	st.Process = c.proc != nil
+	st.Holding = c.holding && !c.closed
 	st.Hidden = c.hidden
 	if c.rec.Lead && !c.closed {
 		st.Lifecycle = wsdashboard.SessionAsleep
@@ -705,6 +786,19 @@ func (c *conv) stateWithKeyCheck(checkKey bool) State {
 	if c.caps != nil {
 		caps := c.caps.clone()
 		st.Capabilities = &caps
+	}
+	if !c.rec.Lead {
+		st.PermissionLevel = c.workerPermissionLevel
+		st.PermissionSource = c.workerPermissionSource
+		if st.PermissionLevel != "" {
+			st.PermissionEnforcement = permissionQuality(c.rec.Backend, st.PermissionLevel, "")
+		}
+	}
+	st.IsChild = c.r.isChildRecord(c.rec)
+	if !c.rec.Lead {
+		// The loop refreshes worker permission at startup and every launch or
+		// control change. State/List stay memory-only on the interactive path.
+		return st
 	}
 	return c.r.permissionState(st, c.rec, c.dir)
 }
@@ -758,10 +852,6 @@ func (c *conv) setStatus(fn func()) {
 // is.
 func (c *conv) writeRegistration() bool {
 	rec := c.record()
-	now := c.r.opts.Now()
-	reg := registration(rec, now)
-	// WriteRegistration normalizes this default before persisting it.
-	reg.SchemaVersion = 1
 	var previousRow *wsdashboard.Registration
 	if rec.Lead {
 		unlock, previous, ok := c.lockRowRead()
@@ -769,20 +859,30 @@ func (c *conv) writeRegistration() bool {
 			return false
 		}
 		defer unlock()
+		if previous != nil {
+			previousRow = previous
+		}
+	}
+	// Take the timestamp after the lead's row lock. A heartbeat sweep that won
+	// the flock first therefore cannot be rolled back by this full-row write.
+	now := c.r.opts.Now()
+	reg := registration(rec, now)
+	// WriteRegistration normalizes this default before persisting it.
+	reg.SchemaVersion = 1
+	if rec.Lead {
 		reg.HostStopped = rec.HostPID == 0 && !c.spawning
 		// The holder manager writes the last exit independently of the
 		// runner's heartbeat; a regenerated row must not discard it.
-		if previous != nil {
-			previousRow = previous
-			reg.HostExitCode = previous.HostExitCode
-			reg.HostExitSignal = previous.HostExitSignal
-			reg.HostExitReason = previous.HostExitReason
-			reg.HostStoppedAt = previous.HostStoppedAt
+		if previousRow != nil {
+			reg.HostExitCode = previousRow.HostExitCode
+			reg.HostExitSignal = previousRow.HostExitSignal
+			reg.HostExitReason = previousRow.HostExitReason
+			reg.HostStoppedAt = previousRow.HostStoppedAt
 		}
 	}
 	// Reuse only the row already read under the lead's ownership lock, not
 	// process-local evidence: a spawn needs a real reservation on disk.
-	if previousRow != nil && now.Sub(c.lastReg) < wsdashboard.HeartbeatInterval {
+	if previousRow != nil && !c.regDue(now) {
 		previous := *previousRow
 		previous.HeartbeatAt = reg.HeartbeatAt
 		if previous == reg {
@@ -794,9 +894,29 @@ func (c *conv) writeRegistration() bool {
 		fmt.Fprintf(c.r.opts.Log, "agent %s: registration write: %v\n", rec.ReplyID, err)
 		return false
 	}
-	c.lastReg = now
+	c.setLastReg(now)
 	c.r.notify(rec.ReplyID, rec.Root)
 	return true
+}
+
+func (c *conv) isForeign() bool { return c.foreignRow.Load() }
+
+func (c *conv) markForeign() { c.foreignRow.Store(true) }
+
+func (c *conv) lastRegAt() time.Time {
+	c.regMu.Lock()
+	defer c.regMu.Unlock()
+	return c.lastReg
+}
+
+func (c *conv) setLastReg(now time.Time) {
+	c.regMu.Lock()
+	c.lastReg = now
+	c.regMu.Unlock()
+}
+
+func (c *conv) regDue(now time.Time) bool {
+	return now.Sub(c.lastRegAt()) >= wsdashboard.HeartbeatInterval
 }
 
 // rowForeign reports whether a session's row, as read, is no longer the
@@ -833,18 +953,23 @@ func (c *conv) lockRow() (unlock func(), ok bool) {
 // reads it once per lock: the live writer takes this lock for every ring
 // and snapshot write (lockSummaryWriter).
 func (c *conv) lockRowRead() (unlock func(), row *wsdashboard.Registration, ok bool) {
-	if c.foreignRow {
+	if c.isForeign() {
 		return nil, nil, false
 	}
-	unlock, err := wsdashboard.LockRegistration(c.r.opts.Dir, c.rec.ReplyID)
+	flockUnlock, err := wsdashboard.LockRegistration(c.r.opts.Dir, c.rec.ReplyID)
 	if err != nil {
 		fmt.Fprintf(c.r.opts.Log, "agent %s: %v\n", c.rec.ReplyID, err)
 		return nil, nil, false
 	}
+	c.rowHeld.Add(1)
+	unlock = func() {
+		c.rowHeld.Add(-1)
+		flockUnlock()
+	}
 	read, err := wsdashboard.ReadRegistration(c.r.opts.Dir, c.rec.ReplyID)
 	if isForeignRow(read, err) {
+		c.markForeign()
 		unlock()
-		c.foreignRow = true
 		return nil, nil, false
 	}
 	if err == nil {
@@ -859,8 +984,8 @@ func (c *conv) lockRowRead() (unlock func(), row *wsdashboard.Registration, ok b
 // lock, and the row leaves the daemon only through a terminal login, which
 // never gives it back.
 func (c *conv) checkRow() {
-	if c.rec.Lead && !c.foreignRow && rowForeign(c.r.opts.Dir, c.rec.ReplyID) {
-		c.foreignRow = true
+	if c.rec.Lead && !c.isForeign() && rowForeign(c.r.opts.Dir, c.rec.ReplyID) {
+		c.markForeign()
 	}
 }
 
@@ -927,8 +1052,29 @@ func (c *conv) dropHeld() {
 // apply applies a wslive event and tells the daemon when it wrote. quiet
 // (a replayed holder record) applies it to the state alone.
 func (c *conv) apply(ev wslive.Event, quiet ...bool) {
-	if len(quiet) == 0 || !quiet[0] {
+	replayed := len(quiet) > 0 && quiet[0]
+	c.applyMode(ev, replayed, false)
+}
+
+// applyCoalesced applies a mapper status whose immediately following TurnEnd
+// is its recovery boundary, avoiding a redundant file-only snapshot rewrite.
+func (c *conv) applyCoalesced(ev wslive.Event, quiet bool) {
+	c.applyMode(ev, quiet, true)
+}
+
+func (c *conv) applyMode(ev wslive.Event, quiet, coalesceTurnEnd bool) {
+	if !quiet {
 		c.observeCompaction(ev)
+	}
+	if ev.Kind == wslive.KindStatus && ev.Context != nil && ev.Context.Compaction == nil {
+		if !quiet {
+			c.refreshCompaction()
+		}
+		if comp := c.usageCompaction(ev.Context.Window); comp != nil {
+			ctx := *ev.Context
+			ctx.Compaction = comp
+			ev.Context = &ctx
+		}
 	}
 	if ev.Kind == wslive.KindReset {
 		c.spawnDirty = true
@@ -953,8 +1099,10 @@ func (c *conv) apply(ev wslive.Event, quiet ...bool) {
 			}
 		})
 	}
-	if len(quiet) > 0 && quiet[0] {
+	if quiet {
 		c.live.applyQuiet(ev)
+	} else if coalesceTurnEnd {
+		c.live.applyCoalesced(ev)
 	} else {
 		c.live.apply(ev)
 	}
@@ -1000,7 +1148,7 @@ func (c *conv) apply(ev wslive.Event, quiet ...bool) {
 // goes alone once nothing is queued.
 func (c *conv) canKick() bool {
 	return !c.closed && !c.hidden && !c.turn && !c.replaying && len(c.steered) == 0 && c.leverC == nil &&
-		!(c.rec.Backend == BackendPi && c.r.opts.Holders != nil && !c.r.scanDone())
+		!(c.r.opts.Holders != nil && !c.r.scanDone())
 }
 
 func (c *conv) kick() {
@@ -1101,12 +1249,12 @@ func (c *conv) kick() {
 	// follow the turn's start.
 	ordinary := cmd == nil
 	if cmd == nil {
-		err = c.proc.Send(c.compactInput(strings.Join(append(append(slices.Clone(parts), reports...), mail...), "\n\n")))
+		err = c.proc.Send(c.turnInput(strings.Join(append(append(slices.Clone(parts), reports...), mail...), "\n\n")))
 	} else if text, ok := c.playbookTurn(*cmd); ok {
 		// The runner expands a playbook command itself: the harness has
 		// no such command, and the turn carries the playbook's body.
 		ordinary = true
-		err = c.proc.Send(c.compactInput(text))
+		err = c.proc.Send(c.turnInput(text))
 	} else {
 		err = c.runCommand(*cmd)
 	}
@@ -1138,12 +1286,22 @@ func (c *conv) kick() {
 	if ordinary {
 		c.compactNote = ""
 		c.compactResume = false
+		c.startModelWait()
 	}
 	c.sendRetried = false
 	c.stopBgGrace()
 	c.turnMark, c.reply = mark, ""
-	// This turn's settle supersedes a done turn held for the children.
-	c.hold(nil)
+	// A child report satisfies an agent worker's hold on the completed turn
+	// that waited for it. Publish that turn before opening the report's
+	// successor. Legacy pi-worker turns, and report-free successors such as
+	// background follow-ups, retain their interim-supersession behavior.
+	if isAgentWorkerProfile(c.rec.Profile) && c.heldRes != nil && len(reports) > 0 {
+		res := *c.heldRes
+		c.hold(nil)
+		c.publish(res)
+	} else {
+		c.hold(nil)
+	}
 	c.update(func(rec *Record) {
 		rec.Queued = rest
 		rec.Drained, rec.TurnMark, rec.Voided = c.drained, mark, c.voided

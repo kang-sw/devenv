@@ -24,7 +24,8 @@ func dashboardJSBlock(t *testing.T, start, end string) string {
 // TestTrackerStoreRegistryUI pins the renderer's store registry actions
 // (tracker.js, the store registry block): a store that leaves the list,
 // hidden or unregistered, drops from the open drawer, the store page and
-// its route, the store menu, its dialogs, and its page-lifetime state,
+// its route, the store menu, its dialogs, the org-chart editor, and its
+// page-lifetime state,
 // with no sync, toast, or retry, also when it runs again; a dialog about
 // a store still hidden here stays. The hidden list offers show and
 // unregister; show redraws the list; hide leaves the store as a collapse
@@ -36,7 +37,7 @@ func dashboardJSBlock(t *testing.T, start, end string) string {
 func TestTrackerStoreRegistryUI(t *testing.T) {
 	block := trackerJSBlock(t, "\n  // The store registry on this machine", "\n  function asciiId(")
 	runTrackerNode(t, "store registry", `
-var bad = [], toasts = [], opened = [], calls = [], replaced = [], cleared = [], menuClosed = 0, dialogsClosed = 0;
+var bad = [], toasts = [], opened = [], calls = [], replaced = [], cleared = [], menuClosed = 0, dialogsClosed = 0, orgEdClosed = 0;
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
 function attr(k, v) { return ' data-' + k + '="' + esc(v) + '"'; }
 function tipAttr(s) { return ' data-tip="' + esc(s) + '"'; }
@@ -47,6 +48,7 @@ function msep() { return '<sep>'; }
 function toast(h) { toasts.push(h); }
 function closeMenu() { menuClosed++; MN = null; }
 function closeDialog() { dialogsClosed++; dlg.open = false; }
+function closeOrgEditor() { orgEdClosed++; }
 function openDialog(kind, d) { opened.push([kind, d.store]); }
 function leavePage() { calls.push('leavePage'); }
 function collapse() { calls.push('collapse'); }
@@ -120,18 +122,18 @@ order = ['B'];
 location.hash = '#/A';
 ui = { store: 'A', open: 'A', page: 'A', item: 'x', win: true, sel: 'r', sub: {}, iedit: {}, cedit: {}, replyTo: 'c', last: [],
   wiki: { A: {}, B: {} }, psr: { A: { timer: 7 } }, nrow: { A: {} }, knew: {}, tab: { A: {}, B: {} }, panel: { A: {} },
-  tabSeen: { 'A|s': {}, 'B|s': {} }, loaded: {}, mdet: { 'A|m': true }, wfold: { 'A|1': true } };
+  tabSeen: { 'A|s': {}, 'B|s': {} }, loaded: {}, mdet: { 'A|m': true }, ofold: { 'A|l': true, 'B|l': true }, wfold: { 'A|1': true } };
 MN = { kind: 'store', store: 'A' }; menuClosed = 0;
 dlg.open = true; dlg.form = mkForm('A'); dlg.form.attrs['data-kind'] = 'relabel'; dialogsClosed = 0;
 dropGone();
 check('shown, open, and routed', [ui.store, ui.open, ui.page, ui.item, ui.win, ui.sel, ui.iedit], ['B', null, null, null, false, null, null]);
 check('route cleared without a history entry', replaced, ['/p']);
-check('menu and dialog closed', [menuClosed, dialogsClosed], [1, 1]);
+check('menu, dialog, and org editor closed', [menuClosed, dialogsClosed, orgEdClosed], [1, 1, 1]);
 check('per-store state', [Object.keys(ui.wiki), Object.keys(ui.psr), Object.keys(ui.nrow), Object.keys(ui.tab), Object.keys(ui.panel)], [['B'], [], [], ['B'], []]);
-check('per-key state', [Object.keys(ui.tabSeen), Object.keys(ui.mdet), Object.keys(ui.wfold)], [['B|s'], [], []]);
+check('per-key state', [Object.keys(ui.tabSeen), Object.keys(ui.mdet), Object.keys(ui.ofold), Object.keys(ui.wfold)], [['B|s'], [], ['B|l'], []]);
 check('search timer stopped', cleared, [7]);
 dropGone();
-check('a second run changes nothing', [replaced.length, menuClosed, dialogsClosed, ui.store], [1, 1, 1, 'B']);
+check('a second run changes nothing', [replaced.length, menuClosed, dialogsClosed, orgEdClosed, ui.store], [1, 1, 1, 1, 'B']);
 check('no toast', toasts, []);
 
 // a dialog about a store still hidden here stays; a store-less dialog closes with its store, the register dialog stays

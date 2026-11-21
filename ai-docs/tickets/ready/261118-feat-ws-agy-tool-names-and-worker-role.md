@@ -1,5 +1,5 @@
 ---
-title: "agy completion: dotted tool-name aliases, harness detection, and the agy worker role"
+title: "agy 마무리: 점(.) 구분 도구명 별칭, 하네스 감지, agy 워커 역할"
 parent: 261114-epic-ws-common-session-foundation
 related:
   261117-feat-ws-hosted-antigravity-adapter: "its Phase 2 (88) shipped the hosted agy lead only and deferred the worker role, naming three prerequisites; Phase 2 here picks them up"
@@ -151,6 +151,9 @@ Two gaps stand in the way:
   (Result deviation (b)). Compatibility T0 expected (an old binary resolves
   no `agy` key); old-binary write preservation is verified per
   `ai-docs/manuals/release-compatibility.md` and recorded.
+  Superseded in part (owner (1869)=a, 2026-11-20, merge `e33fdf27c`): hosted
+  agy connections now report harness `agy` through the backend descriptor's
+  `ManualHarness`; the tier-config key part of this decision stands.
 - **(155)=b, 2026-11-18: builtin agy tier defaults.** Like Claude's builtin
   tiers (`config.go` L640-664), agy ships builtin small..xlarge mappings,
   overridable through `config.tune`; the mapping is (157). Rejected: (a) no
@@ -417,6 +420,13 @@ in this session; these pointers are not an exhaustive rationale-index result.
 
 Owner directive: medium is now `gemini-4-neon`/`high` and large is
 `gemini-4-neon`/`xhigh`; small and xlarge remain unchanged.
+
+#### Edition (bf037d642) - 2026-11-20
+
+Decision (151)'s daemon-owned agy-worker shape and its in-memory-only token
+assumption are superseded by `261120-refactor-ws-agent-workers-under-holders`.
+Remaining work in this ticket must preserve the holder-backed worker lifecycle
+and must not follow the daemon-owned restart or token shape.
 
 ### Phase 3: Custom-agent path for the agy worker behind a knob
 

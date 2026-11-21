@@ -1,15 +1,17 @@
 (function () {
   // Overview is a view, never a card fold or a saved card arrangement. The
   // page owns swaps and the shell bridge; this module owns the picker and
-  // its one scroll writer, wbHistory.place (passed as o.keep).
+  // its one scroll writer, wbHistory.place (passed as o.keep). It covers
+  // the board region only: docked units stay in the docking gallery
+  // (cards.js) as they stand.
   var doc = document, root = doc.documentElement, o = null, on = false, busy = false;
-  var entry = null, spacer = null, pinTop = 0, tabs = new Map(), callbacks = [];
+  var entry = null, spacer = null, tabs = new Map(), callbacks = [];
   var ITEM = "section.topic[data-topic], .bcard[data-card]";
   function all(sel, box) { return Array.prototype.slice.call((box || doc).querySelectorAll(sel)); }
   function identity(n) { return n && (n.hasAttribute("data-card") ? { card: n.getAttribute("data-card") } : { topic: n.getAttribute("data-topic") }); }
   function find(key) {
     if (!key) return null;
-    return all(ITEM, o.board).concat(all(ITEM, o.pins)).filter(function (n) {
+    return all(ITEM, o.board).filter(function (n) {
       return key.card ? n.getAttribute("data-card") === key.card : n.getAttribute("data-topic") === key.topic;
     })[0] || null;
   }
@@ -45,7 +47,7 @@
     if (!t || !t.closest) return "outside";
     if (t.closest(".board-toolbar")) return "toolbar";
     if (t.closest(".tpop:not([hidden]), [popover]:popover-open")) return "popover";
-    if (t.closest("#tkqpop, #tkqs, #shandle, dialog[open], .tk-iwin-back:not([hidden])")) return "palette";
+    if (t.closest("#tkqpop, #tkqs, #shandle, dialog[open], .tk-iwin-back:not([hidden]), .d-tm-back")) return "palette";
     if (t.closest(ITEM) && o.board.contains(t)) return "item";
     return "outside";
   }
@@ -65,11 +67,11 @@
   function save() {
     try {
       var key = "ws.dashboard.overview." + o.rid;
-      if (on) sessionStorage.setItem(key, JSON.stringify({ on: true, key: entry.key, offset: entry.offset, pinTop: pinTop }));
+      if (on) sessionStorage.setItem(key, JSON.stringify({ on: true, key: entry.key, offset: entry.offset }));
       else sessionStorage.removeItem(key);
     } catch (e) { /* denied storage must not disable the view */ }
   }
-  function keep(n, offset) { return o.keep(n, { offset: offset, observe: [o.board, o.pins] }); }
+  function keep(n, offset) { return o.keep(n, { offset: offset, observe: [o.board] }); }
   function flash(n) {
     n.classList.remove("overview-flash");
     void n.offsetWidth;
@@ -134,34 +136,15 @@
     return p <= 0 ? 0 : p >= 1 ? 1 : 2.4 * t * (1 - t) * (1 - t) + 3 * t * t * (1 - t) + t * t * t;
   }
   function snapshot() {
-    var list = items().concat(all(ITEM, o.pins)), seen = new Set();
+    var list = items(), seen = new Set();
     return list.filter(function (n) { if (seen.has(n) || n.hasAttribute("data-state-filtered")) return false; seen.add(n); return true; }).map(function (n) {
       var r = n.getBoundingClientRect(), text = n.querySelector(".trecap .rtext");
       return { n: n, r: r, height: r.height, margin: parseFloat(getComputedStyle(n).marginBottom) || 0,
         text: text, recap: text ? text.getBoundingClientRect().height : 0 };
     });
   }
-  function visible(r) { return r.bottom > 0 && r.top < innerHeight && r.right > 0 && r.left < innerWidth; }
-  function ghost(n, r) {
-    var g = doc.createElement("div"), head = n.querySelector(".tophead, .bc-hd");
-    g.className = "overview-ghost";
-    g.setAttribute("aria-hidden", "true");
-    g.setAttribute("data-overview-target", JSON.stringify(identity(n)));
-    if (head) {
-      var copy = head.cloneNode(true);
-      all("iframe, textarea, input, .doc-frame", copy).forEach(function (x) { x.remove(); });
-      [copy].concat(all("[id]", copy)).forEach(function (x) { x.removeAttribute("id"); });
-      g.appendChild(copy);
-    }
-    var body = doc.createElement("div");
-    body.className = "overview-ghost-body";
-    g.appendChild(body);
-    doc.body.appendChild(g);
-    g.style.left = r.left + "px"; g.style.top = r.top + "px"; g.style.width = r.width + "px"; g.style.height = r.height + "px";
-    return g;
-  }
-  function motion(before, flights, entering, node, from, to, done) {
-    var end = snapshot(), pinEndHeight = o.pins.getBoundingClientRect().height, v = view(scroller(node)), rows = [], clones = [];
+  function motion(before, entering, node, from, to, done) {
+    var end = snapshot(), v = view(scroller(node)), rows = [];
     before.forEach(function (a) {
       var b = end.filter(function (x) { return x.n === a.n; })[0];
       if (!b || a.r.bottom < v.top - v.height || a.r.top > v.bottom + v.height) return;
@@ -175,26 +158,6 @@
       n.style.marginBottom = a.margin + "px";
       if (a.text) a.text.style.maxHeight = a.recap + "px";
     });
-    var slot = null, slotFrom = 0, slotTo = 0, pinStyle = null;
-    if (flights.length) {
-      if (entering) {
-        slot = o.pins; slotTo = pinEndHeight;
-        pinStyle = { height: slot.style.height, overflow: slot.style.overflow };
-      } else {
-        slot = doc.createElement("div"); slot.className = "overview-slot";
-        o.board.insertBefore(slot, o.toolbar.nextSibling);
-        slotFrom = flights.height;
-      }
-      slot.style.overflow = "hidden";
-      slot.style.height = slotFrom + "px";
-      flights.forEach(function (a) {
-        var b = end.filter(function (x) { return x.n === a.n; })[0];
-        if (!b) return;
-        var g = ghost(a.n, a.r), text = g.querySelector(".rtext");
-        clones.push({ n: a.n, g: g, a: a, b: b, text: text, vis: a.n.style.visibility, fly: visible(a.r) && visible(b.r) });
-        a.n.style.visibility = "hidden";
-      });
-    }
     var started = performance.now();
     function frame(now) {
       var p = Math.min(1, Math.max(0, (now - started) / 240)), e = entering ? ease(p) : 1 - ease(1 - p);
@@ -203,33 +166,13 @@
         r.a.n.style.marginBottom = (r.a.margin + (r.b.margin - r.a.margin) * e) + "px";
         if (r.a.text) r.a.text.style.maxHeight = (r.a.recap + (r.b.recap - r.a.recap) * e) + "px";
       });
-      if (slot) slot.style.height = (slotFrom + (slotTo - slotFrom) * e) + "px";
       keep(node, from + (to - from) * e);
-      clones.forEach(function (c) {
-        var r = c.n.getBoundingClientRect(), a = c.a.r;
-        c.g.style.left = (a.left + (r.left - a.left) * e) + "px";
-        c.g.style.top = (a.top + (r.top - a.top) * e) + "px";
-        c.g.style.width = (a.width + (r.width - a.width) * e) + "px";
-        c.g.style.height = (a.height + (r.height - a.height) * e) + "px";
-        if (c.text) c.text.style.maxHeight = (c.a.recap + (c.b.recap - c.a.recap) * e) + "px";
-        if (!c.fly) { c.g.style.opacity = String(1 - e); c.n.style.visibility = c.vis; c.n.style.opacity = String(e); }
-      });
       if (p < 1) { requestAnimationFrame(frame); return; }
-      // At this instant each ghost equals its real, live target. Remove it
-      // only after the final keep application, so no stale target rect wins.
-      clones.forEach(function (c) {
-        c.g.dispatchEvent(new CustomEvent("ws-overview-land", { bubbles: true, detail: { target: c.n, from: c.g.getBoundingClientRect(), to: c.n.getBoundingClientRect() } }));
-        c.g.remove(); c.n.style.visibility = c.vis; c.n.style.opacity = "";
-      });
       rows.forEach(function (r) {
         r.a.n.removeAttribute("data-overview-motion");
         Object.keys(r.old).forEach(function (k) { r.a.n.style[k] = r.old[k]; });
         if (r.a.text) r.a.text.style.maxHeight = r.textHeight;
       });
-      if (slot) {
-        if (entering) { slot.style.height = pinStyle.height; slot.style.overflow = pinStyle.overflow; }
-        else slot.remove();
-      }
       keep(node, to);
       done();
     }
@@ -242,12 +185,10 @@
     var s = scroller(o.toolbar), v = view(s), n = anchor(items(), o.toolbar.firstChild.getBoundingClientRect(), v, o.toolbar.hasAttribute("data-floating"));
     entry = state || { key: identity(n), offset: (n || o.toolbar).getBoundingClientRect().top - v.top };
     if (state && entry.key && !find(entry.key)) entry = { key: null, offset: 0 };
-    pinTop = state ? +state.pinTop || 0 : o.pins.scrollTop;
     n = find(entry.key);
     if (n && n.hasAttribute("data-state-filtered")) { n = items()[0] || null; entry = { key: identity(n), offset: 0 }; }
     var shown = n ? Math.max(entry.offset, clearance(n)) : entry.offset;
     var h = o.frames ? o.frames() : null, before = !state && !calm() ? snapshot() : null;
-    var flights = before && o.pins.parentNode !== o.board ? before.filter(function (a) { return o.pins.contains(a.n); }) : [];
     busy = !!before;
     // Keep enough tail to reach even a partly-visible last topic's negative
     // offset. Added before folding, removed only after unfolding inside keep.
@@ -264,7 +205,7 @@
     o.toolbar.querySelector(".board-overview").setAttribute("aria-pressed", "true");
     save(); changed();
     var complete = function () { rove(n || items()[0]); finish(); if (!state) hint(); };
-    if (before) motion(before, flights, true, n || o.toolbar, entry.offset, shown, complete);
+    if (before) motion(before, true, n || o.toolbar, entry.offset, shown, complete);
     else { keep(n || o.toolbar, shown); complete(); }
   }
   function exit(target, done, options) {
@@ -288,13 +229,9 @@
     var n = target && target.closest ? target.closest(ITEM) : null;
     if (n && n.hasAttribute("data-state-filtered")) n = null;
     var h = o.frames ? o.frames() : null, before = !calm() ? snapshot() : null;
-    var pinRect = o.pins.getBoundingClientRect();
-    var flights = before && root.hasAttribute("data-pincol") ? before.filter(function (a) { return o.pins.contains(a.n); }) : [];
-    flights.height = pinRect.height;
     var restore = find(entry.key);
     if (restore && restore.hasAttribute("data-state-filtered")) { restore = null; if (!n) n = items()[0] || null; }
-    var planned = n && !(root.hasAttribute("data-pincol") && o.pins.contains(n)) ? n : restore;
-    if (planned && root.hasAttribute("data-pincol") && o.pins.contains(planned)) planned = null;
+    var planned = n || restore;
     var from = (planned || o.toolbar).getBoundingClientRect().top - view(scroller(planned || o.toolbar)).top;
     busy = !!before;
     on = false;
@@ -302,20 +239,10 @@
     unrove();
     o.place(false);
     if (o.restoreFrames) o.restoreFrames(h);
-    // A pinned target lands in the column that is current now, not the
-    // layout at entry. The other column returns to its saved scroll too.
-    var inColumn = o.pins.parentNode !== o.board;
-    if (inColumn && o.pins.scrollHeight > o.pins.clientHeight && o.pins.firstElementChild) {
-      var first = o.pins.firstElementChild;
-      var natural = first.getBoundingClientRect().top - view(scroller(first)).top + o.pins.scrollTop;
-      keep(first, natural - pinTop);
-    }
     var landed = n && n.isConnected ? n : null;
-    var boardTarget = landed && !(inColumn && o.pins.contains(landed)) ? landed : restore;
-    if (boardTarget && inColumn && o.pins.contains(boardTarget)) boardTarget = null;
+    var boardTarget = landed || restore;
     var arrival = clearance(boardTarget || o.toolbar);
     var offset = landed && boardTarget === landed ? arrival : boardTarget && restore === boardTarget ? entry.offset : entry.key ? arrival : entry.offset;
-    if (landed && inColumn && o.pins.contains(landed) && scroller(landed) === o.pins) keep(landed, 0);
     o.toolbar.querySelector(".board-overview").setAttribute("aria-pressed", "false");
     save(); changed();
     var complete = function () {
@@ -329,7 +256,7 @@
       finish();
       if (done) done();
     };
-    if (before) motion(before, flights, false, boardTarget || o.toolbar, from, offset, complete);
+    if (before) motion(before, false, boardTarget || o.toolbar, from, offset, complete);
     else { keep(boardTarget || o.toolbar, offset); complete(); }
   }
   function swallow(e) { e.preventDefault(); e.stopImmediatePropagation(); }

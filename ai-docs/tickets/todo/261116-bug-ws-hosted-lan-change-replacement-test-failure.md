@@ -1,5 +1,5 @@
 ---
-title: "Hosted LAN-change daemon replacement test fails repeatedly on Linux w5090"
+title: "Linux w5090에서 hosted LAN 변경 데몬 교체 테스트가 반복 실패하는 문제"
 related:
   261116-bug-ws-exe-launch-elimination: "separate lead-owned process-launch effort; coordinate fixture assumptions, do not duplicate its scope"
 ---

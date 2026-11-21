@@ -141,6 +141,7 @@ var width = 178, git = 90, search = 35;
 var drhandle = { getBoundingClientRect: function () { return { width: width }; } };
 var gitRegion = { getBoundingClientRect: function () { return { width: git }; } };
 var shandle = { getBoundingClientRect: function () { return { width: search }; } };
+var thandle = null;
 function ghandle() { return git ? {} : null; }
 var drheader = { classList: { toggle: function () {} } };
 var doc = { documentElement: { style: { setProperty: function (k, v) { props[k] = v; } } } };

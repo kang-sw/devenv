@@ -36,6 +36,10 @@ import (
 
 // ServerOptions configures a Server for one caller process.
 type ServerOptions struct {
+	// BoardOwner identifies daemon-owned servers even before the dashboard binds.
+	// Raw diagnostic servers leave it false; board writes still commit.
+	BoardOwner bool
+
 	// Root is the repository root the server resolves tool roots from.
 	Root string
 	// Version is the ws-mcp version reported to the client.
@@ -71,6 +75,9 @@ type ServerOptions struct {
 	// every daemon-hosted connection, including token-forwarding workers, so
 	// each connection resolves its backend descriptor and profiles.
 	AgentBackends AgentBackendRegistry
+	// WorktreeChildren exposes the daemon's read-only bound-child query for
+	// worktree.release without granting the lead runner handle (Agents).
+	WorktreeChildren WorktreeChildrenReader
 	// Notes is the daemon's shared presentation cache; nil on standalone servers.
 	Notes *wsnote.Cache
 	// WhiteboardChanged invalidates daemon timers after a successful board write,
@@ -149,8 +156,11 @@ func NewServerWithOptions(opts ServerOptions) *Server {
 	s.inflightDone = make(chan struct{})
 	s.drainCtx, s.drainCancel = context.WithCancel(context.Background())
 	s.sessions = newSessionStore()
+	s.boardOwner = opts.BoardOwner
+	s.sessions.boardOwner = opts.BoardOwner
 	s.sessions.cacheHome = s.getenv(wsstate.EnvCacheHome)
 	s.declared = loadDeclaredConfig(s.getenv(envConfigManifests))
+	s.agentBackendSource = opts.AgentBackends
 	for _, rejected := range s.declared.rejected {
 		fmt.Fprintf(diag, "ws-mcp: config manifest rejected: %s\n", rejected)
 		s.debugEvent("config.manifest_rejected", map[string]any{"manifest": rejected})
@@ -159,8 +169,13 @@ func NewServerWithOptions(opts ServerOptions) *Server {
 		s.observeHarness("hello", opts.Harness)
 	}
 	s.whiteboardChanged = opts.WhiteboardChanged
-	s.agentBackendSource = opts.AgentBackends
 	s.pi.agents = opts.Agents
+	s.pi.worktreeChildren = opts.WorktreeChildren
+	if s.pi.worktreeChildren == nil && opts.Agents != nil {
+		if reader, ok := opts.Agents.(WorktreeChildrenReader); ok {
+			s.pi.worktreeChildren = reader
+		}
+	}
 	s.startPiFeed()
 	return s
 }
@@ -333,14 +348,16 @@ func hostedRowPID(path string) int {
 }
 
 // DropHarnessSessionEnv removes from this process's environment the
-// variables that tie a ws-mcp to one harness session: the hosted-session
-// variables, the harness PID, and a hosted session's ws-mcp credentials.
+// variables that tie a ws-mcp to one harness session or spawned worker:
+// the hosted-session variables, the harness PID, a hosted session's ws-mcp
+// credentials, and a spawned worker's permission level.
 // The dashboard daemon calls it at start. Its environment is that of
 // whichever session's launcher started it, and the conversations it spawns,
 // with the ws-mcp each attaches without a launcher, would otherwise read
-// that session's as their own, or reach its server with its token.
+// that session's as their own, reach its server with its token, or inherit
+// a read-only worker's authority gate.
 func DropHarnessSessionEnv() {
-	for _, name := range []string{envHostedSession, envHostedSessionKey, envHostedSessionRow, envHarnessPID, wsagent.EnvMCPSessionURL, wsagent.EnvMCPSessionToken} {
+	for _, name := range []string{envHostedSession, envHostedSessionKey, envHostedSessionRow, envHarnessPID, wsagent.EnvMCPSessionURL, wsagent.EnvMCPSessionToken, wsagent.EnvPermissionLevel} {
 		_ = os.Unsetenv(name)
 	}
 }

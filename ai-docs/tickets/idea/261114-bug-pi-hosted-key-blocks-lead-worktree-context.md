@@ -1,5 +1,5 @@
 ---
-title: Hosted Pi session key prevents lead context setup in an acquired worktree
+title: "hosted Pi 세션 키가 획득한 worktree에서의 lead 컨텍스트 설정을 막는 문제"
 ---
 
 # Hosted Pi session key prevents lead context setup in an acquired worktree

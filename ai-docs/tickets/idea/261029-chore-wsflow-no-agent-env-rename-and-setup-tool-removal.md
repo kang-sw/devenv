@@ -1,5 +1,5 @@
 ---
-title: Rename WS_MCP_NO_AGENT and remove the unread WS_MCP_SETUP_TOOL env
+title: "WS_MCP_NO_AGENT 이름 변경 및 미사용 WS_MCP_SETUP_TOOL 환경 변수 제거"
 related:
   261029-feat-claude-mod-package-parity-knob-defaults: origin; deferred from its scope
 ---

@@ -1,5 +1,5 @@
 ---
-title: "Accepted-build recovery and emergency rollback for the development daemon"
+title: "개발 데몬의 승인 빌드 복구 및 긴급 롤백"
 related:
   261114-bug-ws-shared-daemon-restarts-without-a-swap: prerequisite
 ---

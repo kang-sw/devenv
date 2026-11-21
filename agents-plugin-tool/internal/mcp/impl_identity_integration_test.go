@@ -87,6 +87,7 @@ func TestImplIdentityResolveProvisionRouteIntegration(t *testing.T) {
 			list := callToolsList(t, server)
 			entry := toolEntryTextByName(t, list, "git.resolve_impl_branch")
 			var schema struct {
+				Description string `json:"description"`
 				InputSchema struct {
 					Properties map[string]any `json:"properties"`
 					Required   []string       `json:"required"`
@@ -94,6 +95,11 @@ func TestImplIdentityResolveProvisionRouteIntegration(t *testing.T) {
 			}
 			if err := json.Unmarshal([]byte(entry), &schema); err != nil {
 				t.Fatalf("parse git.resolve_impl_branch schema: %v", err)
+			}
+			for _, want := range []string{"does not inspect whether the branch exists or has landed", "worktree.acquire", "route.resolve_implement"} {
+				if !strings.Contains(schema.Description, want) {
+					t.Fatalf("git.resolve_impl_branch description missing %q: %s", want, schema.Description)
+				}
 			}
 			for _, want := range []string{"session_key", "ticket_stem", "base", "format"} {
 				if _, ok := schema.InputSchema.Properties[want]; !ok {
@@ -379,5 +385,117 @@ func TestImplIdentityVouchRouteConsumption(t *testing.T) {
 	}
 	if shared.Verdict.BranchPlan.Action != "continue" || shared.Verdict.BranchPlan.TargetBranch != branch {
 		t.Fatalf("vouched rename-disabled branch did not continue in place: %+v", shared.Verdict.BranchPlan)
+	}
+}
+
+// TestImplIdentityMergedLeftoverResolveAcquireRoute pins Decision 3's end-to-end
+// flow: git.resolve_impl_branch keeps returning the deterministic canonical
+// branch name (unchanged contract) even after that branch was merged into its
+// merge root; worktree.acquire recreates the fully landed leftover at develop's
+// tip so route.resolve_implement continues cleanly, while an unlanded leftover
+// with unique commits is preserved rather than discarded.
+func TestImplIdentityMergedLeftoverResolveAcquireRoute(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	root = canonicalRootForTest(t, root)
+	stem := "261121-feat-merged-leftover-reentry"
+	path := writeImplIdentityReadyTicket(t, root, stem)
+	runGit(t, root, "checkout", "-b", "develop")
+	runGit(t, root, "add", ".")
+	runGit(t, root, "commit", "-m", "fixture")
+
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	server := NewServer(root, "test")
+	key, err := server.sessions.mint(root, roleLead, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resolveBranch := func(id int) (branch, mergeRoot, ticketStem string) {
+		t.Helper()
+		var got struct {
+			Branch     string `json:"branch"`
+			MergeRoot  string `json:"merge_root"`
+			TicketStem string `json:"ticket_stem"`
+		}
+		text := callToolWithKey(t, server, id, key, "git.resolve_impl_branch", map[string]any{
+			"ticket_stem": stem, "base": "develop", "format": "json",
+		})
+		if err := json.Unmarshal([]byte(text), &got); err != nil {
+			t.Fatalf("resolve response: %v\n%s", err, text)
+		}
+		return got.Branch, got.MergeRoot, got.TicketStem
+	}
+
+	canonical, mergeRoot, gotStem := resolveBranch(1)
+	if canonical != implTicketBranch("develop", stem) || mergeRoot != "develop" || gotStem != stem {
+		t.Fatalf("first resolve = (%q, %q, %q)", canonical, mergeRoot, gotStem)
+	}
+
+	// Simulate an earlier run whose canonical branch landed on develop via
+	// --no-ff merge, leaving the local canonical ref behind develop.
+	runGit(t, root, "switch", "-c", canonical)
+	runGit(t, root, "commit", "--allow-empty", "-m", "earlier phase work")
+	runGit(t, root, "switch", "develop")
+	runGit(t, root, "merge", "--no-ff", canonical, "-m", "merge earlier phase")
+	developTip := strings.TrimSpace(string(runGitOutput(t, root, "rev-parse", "develop")))
+
+	// Pure name resolution returns the exact same canonical name.
+	second, _, _ := resolveBranch(2)
+	if second != canonical {
+		t.Fatalf("second resolve = %q, want canonical %q", second, canonical)
+	}
+
+	// worktree.acquire recreates the merged canonical branch at develop's tip.
+	var acquired worktreeAcquireResult
+	acqResp := callToolOnce(t, server, 3, "worktree.acquire", map[string]any{
+		"session_key": key, "base": "develop", "profile": "full", "target_branch": second, "format": "json",
+	})
+	if toolIsError(t, acqResp) {
+		t.Fatalf("acquire merged canonical branch failed: %s", acqResp)
+	}
+	if err := json.Unmarshal([]byte(toolText(t, acqResp)), &acquired); err != nil {
+		t.Fatalf("parse acquire: %v\n%s", err, acqResp)
+	}
+	t.Cleanup(func() {
+		_ = callToolOnce(t, server, 99, "worktree.release", map[string]any{"session_key": key, "key": acquired.WorkerKey})
+	})
+	if gotHead := strings.TrimSpace(string(runGitOutput(t, acquired.Path, "rev-parse", "HEAD"))); gotHead != developTip {
+		t.Fatalf("recreated canonical head = %s, want develop tip %s", gotHead, developTip)
+	}
+
+	// route.resolve_implement continues cleanly on the recreated canonical branch.
+	var routed implementResult
+	routeText := callToolWithKey(t, server, 4, acquired.WorkerKey, "route.resolve_implement", implIdentityRouteArgs(stem, path, "yes"))
+	if err := json.Unmarshal([]byte(routeText), &routed); err != nil {
+		t.Fatalf("route response: %v\n%s", err, routeText)
+	}
+	if routed.Verdict.BranchPlan.Action != "continue" || routed.Verdict.BranchPlan.CurrentBranch != canonical {
+		t.Fatalf("recreated canonical branch did not continue: %+v", routed.Verdict.BranchPlan)
+	}
+
+	// An unlanded commit on the canonical branch must be preserved on re-acquire.
+	runGit(t, acquired.Path, "commit", "--allow-empty", "-m", "unlanded work")
+	unlandedTip := strings.TrimSpace(string(runGitOutput(t, acquired.Path, "rev-parse", "HEAD")))
+	if rel := callToolOnce(t, server, 5, "worktree.release", map[string]any{"session_key": key, "key": acquired.WorkerKey}); toolIsError(t, rel) {
+		t.Fatalf("release failed: %s", rel)
+	}
+	runGit(t, root, "commit", "--allow-empty", "-m", "develop moved ahead")
+	acqAgain := callToolOnce(t, server, 6, "worktree.acquire", map[string]any{
+		"session_key": key, "base": "develop", "profile": "full", "target_branch": canonical, "format": "json",
+	})
+	if toolIsError(t, acqAgain) {
+		t.Fatalf("re-acquire unlanded canonical branch failed: %s", acqAgain)
+	}
+	var acquired2 worktreeAcquireResult
+	if err := json.Unmarshal([]byte(toolText(t, acqAgain)), &acquired2); err != nil {
+		t.Fatalf("parse second acquire: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = callToolOnce(t, server, 100, "worktree.release", map[string]any{"session_key": key, "key": acquired2.WorkerKey})
+	})
+	if gotHead := strings.TrimSpace(string(runGitOutput(t, acquired2.Path, "rev-parse", "HEAD"))); gotHead != unlandedTip {
+		t.Fatalf("unlanded canonical branch was reset: got %s, want %s", gotHead, unlandedTip)
 	}
 }

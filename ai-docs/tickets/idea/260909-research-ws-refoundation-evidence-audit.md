@@ -1,5 +1,5 @@
 ---
-title: "Evidence audit behind the ws refoundation: assumption verdicts, cost centers, rejected alternatives"
+title: "ws 재구축 근거 감사: 가정 판정, 비용 중심, 기각된 대안"
 parent: 260909-epic-ws-worker-interpreter-refoundation
 related:
   260605-research-ws-native-subagent-pivot: prior binding anchor; harness-infrastructure axis only

@@ -215,7 +215,7 @@ func (c *conv) handOff() error {
 	}
 	unlock, ok := c.lockRow()
 	if !ok {
-		if c.foreignRow {
+		if c.isForeign() {
 			// A terminal login took the row meanwhile: the same outcome.
 			c.release()
 			return nil
@@ -231,7 +231,7 @@ func (c *conv) handOff() error {
 	if err != nil {
 		return fmt.Errorf("rewrite the session's registration: %w", err)
 	}
-	c.foreignRow = true
+	c.markForeign()
 	c.release()
 	return nil
 }
@@ -309,6 +309,11 @@ func resumeCommand(rec Record, sessionDir string) string {
 			return ""
 		}
 		return cd + "claude --resume " + shellQuote(rec.SessionID)
+	case BackendAgy:
+		if rec.SessionID == "" {
+			return ""
+		}
+		return cd + "agy --conversation " + shellQuote(rec.SessionID)
 	case BackendPi:
 		file := rec.SessionFile
 		if file == "" {

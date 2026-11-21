@@ -99,6 +99,18 @@ func (r *agyRun) harness() []HarnessReport {
 	return out
 }
 
+func TestAgyMapperTracksSteerBeforeFirstProviderUpdate(t *testing.T) {
+	m := newAgyMapper("s")
+	replies := &agyRun{m: m, answers: map[string]controlAnswer{}}
+	m.promptSentText("ws-p-e-1", "initial work")
+	m.promptSentText("ws-p-e-2", "very early mail")
+	events := m.mapLine([]byte(`{"jsonrpc":"2.0","id":"ws-p-e-1","result":{"stopReason":"end_turn"}}`), replies)
+	if !slices.ContainsFunc(events, func(ev Event) bool { return ev.SteerAnswer != nil }) ||
+		!slices.ContainsFunc(events, func(ev Event) bool { return ev.UserTaken == "very early mail" }) {
+		t.Fatalf("the prompt queued before agy's first update was not acknowledged as a steer: %+v", events)
+	}
+}
+
 // turns splits the events at each TurnEnd, the TurnEnd last in its part.
 func (r *agyRun) turns() [][]Event {
 	var out [][]Event
@@ -504,24 +516,27 @@ func TestAgyMapperShapeDemotes(t *testing.T) {
 	}
 }
 
-// TestAgyMapperTrackerWrite: a completed ws tracker.update call raises
-// the tracker write; a failed one does not.
+// TestAgyMapperTrackerWrite: completed ws tracker.update calls raise the
+// tracker write under the current sanitized name and the legacy dotted name;
+// a failed call does not.
 func TestAgyMapperTrackerWrite(t *testing.T) {
 	m := newAgyMapper("s")
 	rr := &agyRun{m: m, answers: map[string]controlAnswer{}}
 	var evs []Event
 	for _, line := range []string{
-		`{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"tool_call","toolCallId":"a","name":"mcp_ws_tracker.update","status":"in_progress","args":{}}}}`,
-		`{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"a","name":"mcp_ws_tracker.update","status":"completed"}}}`,
-		`{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"tool_call","toolCallId":"b","name":"mcp_ws_tracker.update","status":"in_progress","args":{}}}}`,
-		`{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"b","name":"mcp_ws_tracker.update","status":"failed"}}}`,
+		`{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"tool_call","toolCallId":"a","name":"mcp_ws_tracker_update","status":"in_progress","args":{}}}}`,
+		`{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"a","name":"mcp_ws_tracker_update","status":"completed"}}}`,
+		`{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"tool_call","toolCallId":"b","name":"mcp_ws_tracker_update","status":"in_progress","args":{}}}}`,
+		`{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"b","name":"mcp_ws_tracker_update","status":"failed"}}}`,
+		`{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"tool_call","toolCallId":"c","name":"mcp_ws_tracker.update","status":"in_progress","args":{}}}}`,
+		`{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"c","name":"mcp_ws_tracker.update","status":"completed"}}}`,
 	} {
 		evs = append(evs, m.mapLine([]byte(line), rr)...)
 	}
-	if n := len(slices.DeleteFunc(slices.Clone(evs), func(ev Event) bool { return !ev.TrackerWrite })); n != 1 {
+	if n := len(slices.DeleteFunc(slices.Clone(evs), func(ev Event) bool { return !ev.TrackerWrite })); n != 2 {
 		t.Fatalf("%d tracker writes: %+v", n, evs)
 	}
-	if agyMCPToolName(ReservedMCPServer, TrackerWriteTool) != "mcp_ws_tracker.update" {
+	if agyMCPToolName(ReservedMCPServer, TrackerWriteTool) != "mcp_ws_tracker_update" {
 		t.Fatal(agyMCPToolName(ReservedMCPServer, TrackerWriteTool))
 	}
 }

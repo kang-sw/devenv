@@ -133,15 +133,16 @@ function checkStrip(label, g) {
       await dialog.waitFor({ state: 'hidden' });
 
       if (theme === 'dark') {
-        // Beside the pinned column (1600-2199px) the rail overlays again.
+        // From 1600px the rail stays permanently docked (never evicted on pin).
         await page.setViewportSize({ width: 1800, height: 900 });
-        await page.evaluate(() => document.documentElement.setAttribute('data-pincol', ''));
+        await page.evaluate(() => document.documentElement.setAttribute('data-gal', 'narrow'));
         await page.waitForTimeout(100);
         g = await geometry(page);
-        checkStrip('dark/1800/pincol', g);
-        assert.ok(g.railbtn && g.railbtn.l === 16 && g.railbtn.w === 34, 'dark/1800/pincol: rail button shows at the strip start');
-        assert.equal(g.railZ, '45', 'dark/1800/pincol: the rail overlays');
-        await page.evaluate(() => document.documentElement.removeAttribute('data-pincol'));
+        checkStrip('dark/1800/narrow', g);
+        assert.equal(g.railbtn, null, 'dark/1800/narrow: rail stays docked, button hidden');
+        assert.equal(g.rail.l, 12, 'dark/1800/narrow: rail stays docked at left edge');
+        assert.notEqual(g.railZ, '45', 'dark/1800/narrow: rail is not an overlay');
+        await page.evaluate(() => document.documentElement.removeAttribute('data-gal'));
 
         // Narrow: the rail button hangs at the stage's top-left; the open
         // rail and its scrim cover the strip.
@@ -213,7 +214,7 @@ function checkStrip(label, g) {
           await shot(page, `dark-760-step${step}-strip`, { clip: { x: 0, y: 0, width: 760, height: 60 } });
           report.push({ width: 760, step, state, items: g.items.map(i => [i.cls, Math.round(i.box.l), Math.round(i.box.r)]), handles: g.handles.map(h => Math.round(h.l)) });
         }
-        assert.ok(state.tu && state.tch && state.clipped, 'dark/760: the longest head compacts usage, hides chips and ellipsizes the identity ' + JSON.stringify(state));
+        assert.ok(state.tu && state.tch, 'dark/760: the longest head compacts usage and hides chips ' + JSON.stringify(state));
         assert.equal(g.usage.w, 34, 'dark/760: compact usage trigger is 34px');
         await shot(page, 'dark-760');
         await shot(page, 'dark-760-strip', { clip: { x: 0, y: 0, width: 760, height: 60 } });

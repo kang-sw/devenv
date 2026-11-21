@@ -1,5 +1,5 @@
 ---
-title: "Electron standalone daemon start and replacement without stopping session holders"
+title: "세션 holder를 중단하지 않는 Electron 단독 데몬 시작 및 교체"
 related:
   261115-feat-werkschaft-electron-shell: "attach-only first slice and planned missing-daemon start"
   261115-feat-ws-daemon-release-auto-update: "separate user-approved release download and swap; reconcile ownership"

@@ -274,3 +274,76 @@ func TestLeadControlRoutesThroughTheDaemonsGate(t *testing.T) {
 		t.Fatalf("stop from this machine = %d %s", r.status, r.body)
 	}
 }
+
+func TestSettingsGuardChildCardBoundAndNonLocal(t *testing.T) {
+	h := newLeadHarness(t)
+	cardBoundID := ""
+	h.opts.CardBound = func(id string) bool { return id != "" && id == cardBoundID }
+	h.start()
+
+	// 1. A card-bound lead keeps Parent == nil, reports IsChild == true, and is refused 403 on POST /settings.
+	leadRes := h.route(localBrowser, http.MethodPost, "/agents/leads", map[string]any{"root": h.root, "harness": BackendClaude, "model": "sonnet", "effort": "medium"})
+	if leadRes.status != http.StatusCreated {
+		t.Fatalf("create lead = %d %s", leadRes.status, leadRes.body)
+	}
+	cardLead := decodeState(t, leadRes)
+	cardBoundID = cardLead.ID
+	gotCard := decodeState(t, h.route(localBrowser, http.MethodGet, "/agents/"+cardLead.ID, nil))
+	if !gotCard.IsChild || gotCard.Parent != nil {
+		t.Fatalf("card-bound lead state = %+v, want IsChild=true and Parent=nil", gotCard)
+	}
+	if r := h.route(localBrowser, http.MethodPost, "/agents/"+cardLead.ID+"/settings", map[string]any{"model": "opus"}); r.status != http.StatusForbidden {
+		t.Fatalf("card-bound lead POST /settings = %d %s, want 403", r.status, r.body)
+	}
+	if meta, ok := h.runner.SessionMeta(cardLead.ID); !ok || !meta.IsChild || meta.Model != "sonnet" || meta.Effort != "medium" {
+		t.Fatalf("SessionMeta(cardLead) = %+v, %v", meta, ok)
+	}
+
+	// 2. A spawned parented worker is refused 403 on POST /settings.
+	parented := Record{
+		SchemaVersion: recordSchemaVersion,
+		ReplyID:       "childworker1",
+		Profile:       "worker",
+		Backend:       BackendClaude,
+		Root:          h.root,
+		WSKey:         "child-key",
+		Model:         "haiku",
+		Effort:        "low",
+		Parent:        &ParentRef{Kind: ParentLead, ReplyID: cardLead.ID},
+	}
+	h.runner.mu.Lock()
+	h.runner.closed[parented.ReplyID] = parented
+	h.runner.mu.Unlock()
+	if !h.runner.IsChild(parented.ReplyID) {
+		t.Fatal("IsChild(parented) = false")
+	}
+	if r := h.route(localBrowser, http.MethodPost, "/agents/"+parented.ReplyID+"/settings", map[string]any{"model": "opus"}); r.status != http.StatusForbidden {
+		t.Fatalf("parented worker POST /settings = %d %s, want 403", r.status, r.body)
+	}
+
+	// 3. A non-lead conversation refuses non-local and cross-origin POST /settings,
+	// while in-process Runner.SetSettings (used by Support.Select) stays unguarded.
+	supportRec := Record{
+		SchemaVersion: recordSchemaVersion,
+		ReplyID:       "supportconv1",
+		Profile:       "chat",
+		Backend:       BackendClaude,
+		Root:          h.root,
+		WSKey:         "support-key",
+	}
+	h.runner.mu.Lock()
+	h.runner.closed[supportRec.ReplyID] = supportRec
+	h.runner.mu.Unlock()
+	if r := h.route(lanBrowser, http.MethodPost, "/agents/"+supportRec.ReplyID+"/settings", map[string]any{"model": "opus"}); r.status != http.StatusNotFound {
+		t.Fatalf("non-local non-lead settings = %d %s, want 404", r.status, r.body)
+	}
+	if r := h.route(localClient, http.MethodPost, "/agents/"+supportRec.ReplyID+"/settings", map[string]any{"model": "opus"}); r.status != http.StatusForbidden {
+		t.Fatalf("no-origin non-lead settings = %d %s, want 403", r.status, r.body)
+	}
+	// In-process SetSettings on a parentless open conversation works (support drawer contract).
+	normalLead := decodeState(t, h.route(localBrowser, http.MethodPost, "/agents/leads", map[string]any{"root": h.root, "harness": BackendClaude}))
+	m := "opus"
+	if st, err := h.runner.SetSettings(normalLead.ID, &m, nil); err != nil || st.Model != "opus" {
+		t.Fatalf("in-process SetSettings failed: %+v %v", st, err)
+	}
+}

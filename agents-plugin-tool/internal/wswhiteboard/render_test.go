@@ -10,7 +10,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wsi18n"
 )
 
-const sampleDoc = `<p>One update writes the standalone board page and its change stamp.</p>
+const sampleDoc = `<p>One update refreshes the daemon board regions.</p>
 <svg viewBox="0 0 640 170" role="img" xmlns="http://www.w3.org/2000/svg">
   <defs><marker id="ah" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L8,4 L0,8 z"/></marker></defs>
   <rect class="box" x="10" y="55" width="120" height="50" rx="8"/><text x="24" y="77">lead</text><text class="sub" x="24" y="93">one update per turn</text>
@@ -94,207 +94,23 @@ func sampleView(layout Layout) View {
 
 func render(t *testing.T, view View) string {
 	t.Helper()
-	out, err := RenderPage(view)
+	out, err := RenderRegions(view)
 	if err != nil {
-		t.Fatalf("RenderPage: %v", err)
+		t.Fatalf("RenderRegions: %v", err)
 	}
-	return out
+	return string(out.Board) + string(out.Panels)
 }
 
 func layouts() map[string]Layout {
 	return map[string]Layout{"full": LayoutFull}
 }
 
-func TestRenderPageDocumentShape(t *testing.T) {
-	htmlTag := regexp.MustCompile(`<html[^>]*>`)
-	for name, layout := range layouts() {
-		out := render(t, sampleView(layout))
-		if !strings.HasPrefix(out, "<!DOCTYPE html>") {
-			t.Errorf("%s: page does not start with the doctype: %.40q", name, out)
-		}
-		if tag := htmlTag.FindString(out); tag == "" || strings.Contains(tag, "lang") {
-			t.Errorf("%s: html tag %q missing or carries a lang attribute", name, tag)
-		}
-		if strings.Contains(out, " lang=") {
-			t.Errorf("%s: page carries a lang attribute", name)
-		}
-		if !strings.Contains(out, `<body class="`+name+`">`) {
-			t.Errorf("%s: body class missing", name)
-		}
-	}
-}
-
-func TestRenderPageIsSelfContained(t *testing.T) {
-	external := []*regexp.Regexp{
-		regexp.MustCompile(`(?i)\b(src|href)\s*=\s*["']?\s*(https?:)?//`),
-		regexp.MustCompile(`(?i)url\(\s*["']?\s*(https?:)?//`),
-		regexp.MustCompile(`(?i)@import`),
-		regexp.MustCompile(`(?i)<link\b`),
-		regexp.MustCompile(`(?i)<script[^>]+src=`),
-	}
-	for name, layout := range layouts() {
-		out := render(t, sampleView(layout))
-		for _, re := range external {
-			if loc := re.FindStringIndex(out); loc != nil {
-				t.Errorf("%s: external reference %q matches %s", name, out[loc[0]:min(loc[1]+40, len(out))], re)
-			}
-		}
-		if !strings.Contains(out, `<symbol id="i-check"`) || !strings.Contains(out, `<use href="#i-check"/>`) {
-			t.Errorf("%s: icons do not come from the inline sprite", name)
-		}
-		if strings.Contains(out, "navigator.clipboard") {
-			t.Errorf("%s: page uses navigator.clipboard", name)
-		}
-		if !strings.Contains(out, `execCommand("copy")`) {
-			t.Errorf("%s: copy does not use execCommand", name)
-		}
-	}
-}
-
-func TestRenderPageChangeSignal(t *testing.T) {
-	full := render(t, sampleView(LayoutFull))
-	// The page carries its own seq so the poller compares every stamp, the
-	// first included, against the version it was rendered at.
-	root := regexp.MustCompile(`<html\b[^>]*>`).FindString(full)
-	if !strings.Contains(root, `data-stamp="barrette-regain-lumpiness.stamp.js"`) || !strings.Contains(root, `data-seq="12"`) {
-		t.Errorf("full page lacks the data-stamp and data-seq attributes")
-	}
-	if !strings.Contains(root, `data-wb-reply="barrette-regain-lumpiness"`) {
-		t.Errorf("full page lacks its reply-scoped reader-state identity")
-	}
-	for _, want := range []string{"window.wbStamp", `getAttribute("data-seq")`, "v !== ownSeq", "setInterval(poll, 1500)", `id="wb-banner"`, `"wb-scroll"`, `"wb-open-"`} {
-		if !strings.Contains(full, want) {
-			t.Errorf("full page lacks %q", want)
-		}
-	}
-	// Scroll restore runs after every synchronous fill: the panel open-state
-	// restore and the form's first build.
-	restore := strings.LastIndex(full, `getItem("wb-scroll")`)
-	if restore < strings.Index(full, `getItem("wb-open-"`) || restore < strings.LastIndex(full, "build();") {
-		t.Errorf("scroll restore is not the last synchronous step")
-	}
-}
-
-// docTag finds the topic body's <details> tag on a page.
-var docTag = regexp.MustCompile(`<details class="tdoc"[^>]*>`)
-
-// TestRenderPageTopicBodyPlacement pins where a topic body sits: inside its
-// topic block, between the title bar and the items, open on the full page
-// unless the topic is closed.
-func TestRenderPageTopicBodyPlacement(t *testing.T) {
-	for name, layout := range map[string]Layout{"full": LayoutFull} {
-		st := sampleState()
-		st.Topics = []TopicDoc{{Name: "page layout", Body: "layout **notes**", Changed: 12}, {Name: "초기 범위", Body: "closed notes", Changed: 3}, {Name: "tool surface", Body: "old notes", Changed: 4}}
-		out := render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r"}))
-		start := strings.Index(out, `<span class="tname" title="page layout">page layout</span>`)
-		block := out[start:]
-		block = block[:strings.Index(block, "</section>")]
-		doc, items := strings.Index(block, `<details class="tdoc"`), strings.Index(block, `class="topic-stream"`)
-		if doc < 0 || items < 0 || doc > items {
-			t.Errorf("%s: the body (%d) is not above the items (%d)", name, doc, items)
-		}
-		wantAll(t, block, `<summary title="topic notes"><svg class="i" aria-hidden="true"><use href="#i-book"/></svg>`, `<div class="doc-body md">layout <strong>notes</strong></div>`)
-		if tag := docTag.FindString(block); tag != `<details class="tdoc" data-key="doc:page layout" data-body-at="" open>` {
-			t.Errorf("%s: body tag = %q, want it open", name, tag)
-		}
-		// An unchanged body is also open on the full page.
-		start = strings.Index(out, `<span class="tname" title="tool surface">tool surface</span>`)
-		block = out[start:]
-		block = block[:strings.Index(block, "</section>")]
-		tag := docTag.FindString(block)
-		if open := strings.HasSuffix(tag, " open>"); !open {
-			t.Errorf("%s: unchanged body tag %q is not open", name, tag)
-		}
-		// A closed topic folds its body on both pages.
-		start = strings.Index(out, `<span class="tname" title="초기 범위">초기 범위</span>`)
-		if start < 0 {
-			t.Fatalf("%s: closed topic missing", name)
-		}
-		block = out[start:]
-		block = block[:strings.Index(block, "</section>")]
-		if tag := docTag.FindString(block); tag != `<details class="tdoc" data-key="doc:초기 범위" data-body-at="">` {
-			t.Errorf("%s: closed topic's body tag = %q, want a closed fold", name, tag)
-		}
-		if !strings.Contains(block, "closed notes") {
-			t.Errorf("%s: a closed topic still carries its body", name)
-		}
-		// A topic with no body has no body block.
-		start = strings.Index(out, `<span class="tname" title="page storage">page storage</span>`)
-		block = out[start:]
-		block = block[:strings.Index(block, "</section>")]
-		if strings.Contains(block, "tdoc") {
-			t.Errorf("%s: a topic without a body renders one", name)
-		}
-	}
-}
-
-// TestRenderPageContentOnlyTopic: a topic with a body and no items renders
-// its block with the body; closing it retains HISTORY and folds only the body.
-func TestRenderPageContentOnlyTopic(t *testing.T) {
-	st := &State{}
-	mustApply(t, st, topicXML("notes", "# Plan\n\n- one"))
-	out := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
-	wantAll(t, out, `<section class="topic" id="`+topicAnchor("notes")+`" data-topic="notes" data-state="discussing"><div class="tophead"><div class="tbar"><span class="topic-state dw">`,
-		`</span><span class="tlead"><span class="tname" title="notes">notes</span></span>`,
-		`<details class="entry-panel`, `data-key="entry:e1" id="p1" open>`, "<h1>Plan</h1>", "<li>one</li>")
-	wantNone(t, out, `class="tdoc"`)
-	wantNone(t, out, `class="tbody"`)
-	// Nothing to answer: the reply bar waits hidden for a topic note.
-	wantAll(t, out, `<div class="reply solo" data-idle hidden>`)
-
-	mustApply(t, st, `<wb:topic name="notes"><wb:close result="done"/></wb:topic>`)
-	out = render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
-	wantAll(t, out, `<section class="topic closed" id="`+topicAnchor("notes")+`" data-topic="notes" title="closed"><div class="tophead"><div class="tbar"><span class="tlead"><span class="tname" title="notes">notes</span></span>`,
-		`class="trecap" data-entry="e4" data-kind="agent"`,
-		`<div class="topic-stream">`,
-		`<details class="entry-panel`, `data-key="entry:e1" id="p1"><summary`, "<h1>Plan</h1>")
-	wantNone(t, out, `data-key="doc:notes" open>`, `data-key="entry:e1" id="p1" open>`)
-}
-
-// TestRenderPageTopicKeyAttribute: every topic section carries its name as
-// data-topic, escaped as an attribute value, the key a live page matches
-// topics by across board swaps.
-func TestRenderPageTopicKeyAttribute(t *testing.T) {
-	for name, layout := range layouts() {
-		st := sampleState()
-		st.Topics = []TopicDoc{{Name: `say "hi" & <go>`, Body: "notes", Changed: 12}}
-		out := render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r"}))
-		if !regexp.MustCompile(`<section class="topic[^"]*" id="` + topicAnchor(`say "hi" & <go>`) + `" data-topic="say &#34;hi&#34; &amp; &lt;go&gt;"><div class="tophead"><div class="tbar">`).MatchString(out) {
-			t.Errorf("%s: topic key attribute missing or unescaped", name)
-		}
-		if strings.Count(out, `<section class="topic`) != len(regexp.MustCompile(`<section class="topic[^"]*" id="[^"]+" data-topic="`).FindAllString(out, -1)) {
-			t.Errorf("%s: a topic section without data-topic", name)
-		}
-	}
-}
-
-// TestRenderPageTopicBodyToggleBelongsToTheBar pins the toggle's hook: a topic
-// with a body is marked has-doc (the bar reserves room for the button) and the
-// stylesheet pins the summary onto the bar instead of giving it a row; a
-// topic without a body carries neither the mark nor a details.
-func TestRenderPageTopicBodyToggleBelongsToTheBar(t *testing.T) {
-	for name, layout := range map[string]Layout{"full": LayoutFull} {
-		st := sampleState()
-		st.Topics = []TopicDoc{{Name: "page layout", Body: "layout notes", Changed: 12}}
-		out := render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r"}))
-		wantAll(t, out, `<section class="topic has-doc" id="`+topicAnchor("page layout")+`" data-topic="page layout" data-open-asks="true"><div class="tophead"><div class="tbar"><span class="tlead"><span class="tname" title="page layout">page layout</span></span>`,
-			`.topic.has-doc > .tophead > .tbar { padding-right:`, `details.tdoc > summary { position: absolute;`)
-		start := strings.Index(out, `<span class="tname" title="page storage">page storage</span>`)
-		if start < 0 {
-			t.Fatalf("%s: topic missing", name)
-		}
-		if open := strings.LastIndex(out[:start], `<section class="topic`); strings.Contains(out[open:start], "has-doc") {
-			t.Errorf("%s: a topic without a body is marked has-doc", name)
-		}
-	}
-}
-
-// TestRenderPageEscapesItemTextButNotTopicBody pins what reaches a page as
+// TestRenderRegionsEscapesItemTextButNotTopicBody pins what reaches a page as
 // markup: a title, topic name, link, answer quote, and panel text escape
 // every tag; option, rationale, and recommendation text keep only what the
 // reply sanitizer keeps (<u> stays, a script, an event attribute, and a
 // javascript: link do not); a topic body is written as is.
-func TestRenderPageEscapesItemTextButNotTopicBody(t *testing.T) {
+func TestRenderRegionsEscapesItemTextButNotTopicBody(t *testing.T) {
 	st := &State{Seq: 2, Topics: []TopicDoc{{Name: "t", Body: `<b id="doc-raw">raw <i>doc</i></b>`}}}
 	st.Items = []Item{
 		{ID: 1, Class: ClassPolicy, Topic: "<script>t()</script>", Title: "<script>alert(1)</script>",
@@ -304,7 +120,12 @@ func TestRenderPageEscapesItemTextButNotTopicBody(t *testing.T) {
 	}
 	panels := []Panel{{ID: `x"><script>p()</script>`, Title: "<script>pt()</script>", Icon: `"><script>`, Rows: []PanelRow{{State: `"><b>`, Label: "<l>", Text: "<script>pr()</script>"}}}}
 	for name, layout := range layouts() {
-		out := render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r", Panels: panels}))
+		view := BuildView(st, ViewInput{Layout: layout, ReplyID: "r", Panels: panels})
+		regions, err := RenderRegions(view)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := string(regions.Board) + string(regions.Panels)
 		for _, raw := range []string{"<script>alert(1)", "<script>t()", "alert(2)", "<script>r()", `href="javascript`, "<script>q()", "<script>p()", "<script>pt()", "<script>pr()", "<tag>"} {
 			if strings.Contains(out, raw) {
 				t.Errorf("%s: item text %q is not escaped", name, raw)
@@ -319,54 +140,45 @@ func TestRenderPageEscapesItemTextButNotTopicBody(t *testing.T) {
 		if !strings.Contains(out, `<div class="rec-line md" title="recommendation"><b><svg class="i" aria-hidden="true"><use href="#i-star"/></svg>a</b> <u>why</u></div>`) {
 			t.Errorf("%s: a kept tag in the recommendation is not kept", name)
 		}
-		if layout == LayoutFull && !strings.Contains(out, `<b id="doc-raw">raw <i>doc</i></b>`) {
+		if !strings.Contains(frameDocs(t, string(regions.Board))["t"], `<b id="doc-raw">raw <i>doc</i></b>`) {
 			t.Errorf("%s: topic body is not written unescaped", name)
 		}
 		if !strings.Contains(out, `<use href="#i-list"/>`) {
 			t.Errorf("%s: unknown panel icon did not fall back to the list symbol", name)
 		}
-		// Its own, after the client string table every page carries.
-		if got := strings.Count(out, "<script>"); got != 2 {
-			t.Errorf("%s: page holds %d script elements, want the string table and its own", name, got)
-		}
 	}
 }
 
-// docBody renders a board whose topic "doc" holds body, with item 90 on the
-// page for references, and returns that body's inner HTML and the page.
+// docBody renders regions whose topic "doc" holds body, with item 90 on the
+// board for references, and returns the frame body's inner HTML and the board.
 func docBody(t *testing.T, body string, in ViewInput) (inner, page string) {
 	t.Helper()
 	st := &State{Seq: 2, Topics: []TopicDoc{{Name: "doc", Body: body, Changed: 2}}, Items: []Item{{ID: 90, Class: ClassTechnical, Topic: "t", Title: "target", Status: StatusOpen}}}
 	in.ReplyID = "r"
-	page = render(t, BuildView(st, in))
-	const open = `<div class="doc-body md">`
-	start := strings.Index(page, open)
-	end := strings.Index(page, "</div></details>")
-	if start < 0 || end < start {
-		t.Fatalf("no topic body in:\n%s", page)
+	regions, err := RenderRegions(BuildView(st, in))
+	if err != nil {
+		t.Fatal(err)
 	}
-	return page[start+len(open) : end], page
+	page = string(regions.Board) + string(regions.Panels)
+	doc := frameDocs(t, string(regions.Board))["doc"]
+	const open = `<div class="doc-body md">`
+	start := strings.Index(doc, open)
+	if start < 0 {
+		t.Fatalf("no topic body in frame:\n%s", doc)
+	}
+	end := strings.Index(doc[start+len(open):], "</div><script")
+	if end < 0 {
+		t.Fatalf("no topic body end in frame:\n%s", doc)
+	}
+	return doc[start+len(open) : start+len(open)+end], page
 }
 
-// TestTopicBodyRendersMarkdownWithInlineHTML pins the body's renderer: block
-// markdown as in item fields, mermaid included, with raw HTML and inline SVG
-// written as is, on the disk board and the served page alike.
+// TestTopicBodyRendersMarkdownWithInlineHTML pins the framed body's renderer:
+// block markdown, mermaid, raw HTML, and inline SVG are preserved.
 func TestTopicBodyRendersMarkdownWithInlineHTML(t *testing.T) {
 	body := "# Plan\n\n- one\n- **two**\n\n```mermaid\ngraph TD; A-->B\n```\n\n" + sampleDoc
-	for name, in := range map[string]ViewInput{
-		"disk":   {Layout: LayoutFull},
-		"served": {Layout: LayoutFull, FileText: func(p string) string { return p }, ImageSrc: func(string) string { return "" }},
-	} {
-		inner, page := docBody(t, body, in)
-		wantAll(t, inner, "<h1>Plan</h1>", "<li><strong>two</strong></li>", `<pre class="mermaid">graph TD; A--&gt;B`, sampleDoc)
-		if !UsesMermaid(page) {
-			t.Errorf("%s: a mermaid block in a body does not load the mermaid script", name)
-		}
-	}
-	// A page without a mermaid block loads no mermaid script.
-	if _, page := docBody(t, "plain", ViewInput{Layout: LayoutFull}); UsesMermaid(page) {
-		t.Errorf("a body without a mermaid block loads mermaid")
-	}
+	inner, _ := docBody(t, body, ViewInput{Layout: LayoutFull, FileText: func(p string) string { return p }, ImageSrc: func(string) string { return "" }})
+	wantAll(t, inner, "<h1>Plan</h1>", "<li><strong>two</strong></li>", `<pre class="mermaid">graph TD; A--&gt;B`, sampleDoc)
 	st := &State{Seq: 2, Topics: []TopicDoc{{Name: "doc", Body: body, Changed: 2}}}
 	regions, err := RenderRegions(BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
 	if err != nil {
@@ -388,12 +200,9 @@ func TestTopicBodyRendersMarkdownWithInlineHTML(t *testing.T) {
 // markdown text with an inline tag, gains a paragraph.
 func TestTopicBodyKeepsInlineScript(t *testing.T) {
 	script := "<script>\nconst g = document.getElementById(\"c\").getContext(\"2d\");\n\ng.fillRect(0, 0, 10, 10);\n</script>"
-	body, page := docBody(t, "<canvas id=\"c\" width=\"120\" height=\"40\"></canvas>\n"+script, ViewInput{Layout: LayoutFull})
+	body, _ := docBody(t, "<canvas id=\"c\" width=\"120\" height=\"40\"></canvas>\n"+script, ViewInput{Layout: LayoutFull})
 	if want := "<p><canvas id=\"c\" width=\"120\" height=\"40\"></canvas></p>\n" + script; body != want {
 		t.Errorf("body = %q, want %q", body, want)
-	}
-	if got := strings.Count(page, "<script>"); got != 3 {
-		t.Errorf("page holds %d script elements, want the string table, its own and the body's", got)
 	}
 }
 
@@ -421,11 +230,18 @@ func TestTopicBodyHTMLCaveats(t *testing.T) {
 	// The body a lead writes in the command string reaches the page as written.
 	st := &State{}
 	mustApply(t, st, addXML(ClassTechnical, "t", "x")+"<wb:topic name=\"t\"><wb:body>\n## 배경\n\n<details><summary>접기</summary>\n<p>1 < 2 & 3 > 2</p>\n</details>\n</wb:body></wb:topic>")
-	page := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
-	wantAll(t, page, "<h2>배경</h2>", "<details><summary>접기</summary>\n<p>1 < 2 & 3 > 2</p>\n</details>")
+	regions, err := RenderRegions(BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := ""
+	for _, frame := range frameDocs(t, string(regions.Board)) {
+		doc += frame
+	}
+	wantAll(t, doc, "<h2>배경</h2>", "<details><summary>접기</summary>\n<p>1 < 2 & 3 > 2</p>\n</details>")
 }
 
-func TestRenderPageTopicBlockOrder(t *testing.T) {
+func TestRenderRegionsTopicBlockOrder(t *testing.T) {
 	out := render(t, sampleView(LayoutFull))
 	start := strings.Index(out, `<span class="tname" title="page layout">page layout</span>`)
 	if start < 0 {
@@ -442,7 +258,7 @@ func TestRenderPageTopicBlockOrder(t *testing.T) {
 	if !(list >= 0 && list < assumed && assumed < settled && settled < asks && asks < policy) {
 		t.Errorf("block order settled list %d, assumed %d, settled %d, asks %d, policy %d", list, assumed, settled, asks, policy)
 	}
-	if !strings.Contains(block, `<span class="chip policy" title="to answer">`) || strings.Contains(block, "chip assumed") {
+	if !strings.Contains(block, `<button type="button" class="chip policy bulk"`) || strings.Contains(block, "chip assumed") {
 		t.Errorf("title bar chips: want the policy count and no assumed count")
 	}
 
@@ -455,7 +271,7 @@ func TestRenderPageTopicBlockOrder(t *testing.T) {
 	}
 }
 
-func TestRenderPagePolicyOptionsAndPicks(t *testing.T) {
+func TestRenderRegionsPolicyOptionsAndPicks(t *testing.T) {
 	out := render(t, sampleView(LayoutFull))
 	for _, want := range []string{
 		`<div class="card policy" id="item-77" data-id="77">`,
@@ -480,7 +296,7 @@ func TestRenderPagePolicyOptionsAndPicks(t *testing.T) {
 // lead's reading, a small assumed marker, and a pen whose note becomes the
 // user's veto or comment. It counts nowhere as waiting: no header or topic
 // chip, no bulk checkbox, and its topic is quiet once nothing else waits.
-func TestRenderPageAssumedItemIsASettledRow(t *testing.T) {
+func TestRenderRegionsAssumedItemIsASettledRow(t *testing.T) {
 	// A topic holding only an assumed item waits on nothing: the item rotates
 	// with the settled rows, the header carries no count, and full history
 	// stays open after the topic closes.
@@ -506,7 +322,7 @@ func TestRenderPageAssumedItemIsASettledRow(t *testing.T) {
 	wantNone(t, regexpHistoryArticle(full, "item-72"), "note-toggle", "wb-hassumed")
 
 	closedFull := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
-	wantAll(t, closedFull, `<section class="topic closed" id="`+topicAnchor("t")+`" data-topic="t" title="closed">`, `<div class="topic-stream">`, `data-history-item="1"`, `data-id="01"`, `title="correction"`)
+	wantAll(t, closedFull, `<section class="topic closed" id="`+topicAnchor("t")+`" data-topic="t"`, `title="closed"`, `<div class="topic-stream">`, `data-history-item="1"`, `data-id="01"`, `title="correction"`)
 	wantNone(t, closedFull, `<details class="settled"`, `<details class="topic-stream"`)
 }
 
@@ -515,7 +331,7 @@ func TestRenderPageAssumedItemIsASettledRow(t *testing.T) {
 // rationale, every option (static: no answer-control attributes, the pick
 // marked by a class), and the recommendation. Links stay in the compact row
 // only. A row with nothing more to show stays plain.
-func TestRenderPageSettledRowExpands(t *testing.T) {
+func TestRenderRegionsSettledRowExpands(t *testing.T) {
 	st := &State{Counter: 9, Seq: 3, SettleSeq: 5, Items: []Item{
 		{ID: 1, Class: ClassPolicy, Topic: "t", Title: "where", Options: []string{"here", "there", "nowhere"},
 			Recommendation: "b: closer", Rationale: "context **why**", Links: []string{"see {{2}}"},
@@ -565,7 +381,7 @@ func TestRenderPageSettledRowExpands(t *testing.T) {
 // A settled row's picked-option chip is a flex row; inline code and an item
 // link in the option must stay inside one text item, not become flex items of
 // their own that wrap into narrow columns.
-func TestRenderPagePickedChipKeepsInlineMarkupInOneTextItem(t *testing.T) {
+func TestRenderRegionsPickedChipKeepsInlineMarkupInOneTextItem(t *testing.T) {
 	st := &State{Counter: 9, Seq: 3, SettleSeq: 5, Items: []Item{
 		{ID: 1, Class: ClassTechnical, Topic: "t", Title: "rules", Status: StatusAnswered, Answer: "ok", Settled: 1, Changed: 2},
 		{ID: 2, Class: ClassPolicy, Topic: "t", Title: "tools", Options: []string{"two `tracker.query` tools per {{1}} rule", "b"},
@@ -578,7 +394,7 @@ func TestRenderPagePickedChipKeepsInlineMarkupInOneTextItem(t *testing.T) {
 	}
 }
 
-func TestRenderPageQuietAndCollapsedSettled(t *testing.T) {
+func TestRenderRegionsQuietAndCollapsedSettled(t *testing.T) {
 	history := render(t, sampleView(LayoutFull))
 	for _, topic := range []string{"초기 범위", "tool surface"} {
 		block := recapBlock(t, history, topic)
@@ -599,7 +415,7 @@ func TestRenderPageQuietAndCollapsedSettled(t *testing.T) {
 	}
 }
 
-func TestRenderPageReplyBar(t *testing.T) {
+func TestRenderRegionsReplyBar(t *testing.T) {
 	view := sampleView(LayoutFull)
 	if !view.BulkAck || !view.Answerable {
 		t.Fatalf("sample board should be answerable with a bulk checkbox")
@@ -626,24 +442,21 @@ func TestRenderPageReplyBar(t *testing.T) {
 	}
 }
 
-func TestRenderPagePanels(t *testing.T) {
+func TestRenderRegionsPanels(t *testing.T) {
 	full := render(t, sampleView(LayoutFull))
-	for _, want := range []string{`<details class="panel" id="p-todo" open>`, `<details class="panel" id="p-agenda" open>`, `<aside class="side flat">`, `<li class="done" title="mockup"><span class="box"><svg class="i" aria-hidden="true"><use href="#i-box-done"/></svg></span>`, `<li class="keyed"><code>whiteboard.render</code>`} {
+	for _, want := range []string{`<details class="panel" id="p-todo" open>`, `<details class="panel" id="p-agenda" open>`, `<li class="done" title="mockup"><span class="box"><svg class="i" aria-hidden="true"><use href="#i-box-done"/></svg></span>`, `<li class="keyed"><code>whiteboard.render</code>`} {
 		if !strings.Contains(full, want) {
 			t.Errorf("full page lacks %q", want)
 		}
 	}
-	if strings.Index(full, `<aside class="side flat">`) < strings.Index(full, `</main>`) {
-		t.Errorf("auxiliary sections must follow the full-width board")
-	}
 	view := sampleView(LayoutFull)
 	view.Panels = nil
-	if out := render(t, view); !strings.Contains(out, `<div class="grid solo">`) || strings.Contains(out, "<aside") {
-		t.Errorf("full page without panels still reserves a sidebar")
+	if out := render(t, view); strings.Contains(out, `<details class="panel"`) {
+		t.Errorf("panel fragments rendered without panels")
 	}
 }
 
-func TestRenderPageLinkAnchors(t *testing.T) {
+func TestRenderRegionsLinkAnchors(t *testing.T) {
 	out := render(t, sampleView(LayoutFull))
 	if !strings.Contains(out, `follows <a href="#item-69">(69)</a>`) {
 		t.Errorf("link to an item on the page is not an anchor")
@@ -659,12 +472,12 @@ func TestRenderPageLinkAnchors(t *testing.T) {
 	}
 }
 
-// TestRenderPageItemReferences checks the {{nn}} resolution in every
+// TestRenderRegionsItemReferences checks the {{nn}} resolution in every
 // lead-authored field: an item on the page anchors as (nn), an item the store
 // holds but the page omits renders as plain (nn), an ID the store does not
 // hold stays verbatim, and prose parentheses and non-digit brace tokens are
 // literal. The user's answer quote is never resolved.
-func TestRenderPageItemReferences(t *testing.T) {
+func TestRenderRegionsItemReferences(t *testing.T) {
 	st := &State{Seq: 3, SettleSeq: 2}
 	st.Items = []Item{
 		{ID: 1, Class: ClassTechnical, Topic: "t", Title: "target", Status: StatusOpen},
@@ -714,7 +527,7 @@ func TestRenderPageItemReferences(t *testing.T) {
 	}
 }
 
-func TestRenderPageItemReferenceKeepsEscaping(t *testing.T) {
+func TestRenderRegionsItemReferenceKeepsEscaping(t *testing.T) {
 	st := &State{Seq: 2}
 	st.Items = []Item{
 		{ID: 1, Class: ClassTechnical, Topic: "t", Title: `<u>x</u>{{01}}<script>s()</script>`,
@@ -737,103 +550,8 @@ func TestRenderPageItemReferenceKeepsEscaping(t *testing.T) {
 
 // Standalone boards load no tracker, file explorer, or Git controls.
 // Every other client key stays available, including body/gutter timestamps,
-// state clocks, forms, pills, code controls, and the standalone viewer.
-func TestPagesLeaveOutDashboardOnlyStrings(t *testing.T) {
-	assets, err := assetFS.ReadDir("assets")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, asset := range assets {
-		if !strings.HasSuffix(asset.Name(), ".js") {
-			continue
-		}
-		source, err := embeddedAsset(asset.Name())
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, prefix := range []string{trackerKeyPrefix, filesKeyPrefix, gitKeyPrefix} {
-			if strings.Contains(string(source), prefix) {
-				t.Errorf("%s consumes excluded prefix %q", asset.Name(), prefix)
-			}
-		}
-	}
-	st := &State{Seq: 1}
-	for _, layout := range []Layout{LayoutFull} {
-		out := render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r"}))
-		for key := range wsi18n.ClientTable("en") {
-			want := !strings.HasPrefix(key, trackerKeyPrefix) && !strings.HasPrefix(key, filesKeyPrefix) && !strings.HasPrefix(key, gitKeyPrefix)
-			if got := strings.Contains(out, `"`+key+`":`); got != want {
-				t.Errorf("layout %v: client key %q present = %v, want %v", layout, key, got, want)
-			}
-		}
-	}
-}
-
-func TestRenderPageSizeBudget(t *testing.T) {
-	long := strings.Repeat("A fairly long sentence about the trade-off, written the way a lead explains it. ", 4)
-	st := &State{Seq: 30, Topics: []TopicDoc{{Name: "topic 1", Body: sampleDoc, Changed: 30}, {Name: "topic 2", Body: sampleDoc, Changed: 5}}}
-	settle := 0
-	for i := 1; i <= 60; i++ {
-		item := Item{ID: i, Topic: fmt.Sprintf("topic %d", i%6), Title: fmt.Sprintf("Item %d: %s", i, long[:120]), Rationale: long, Links: []string{fmt.Sprintf("see {{%d}}", max(1, i-1))}, Changed: 15 + i%16}
-		switch i % 4 {
-		case 0:
-			item.Class, item.Status = ClassPolicy, StatusOpen
-			item.Options, item.Recommendation = []string{long[:90], long[:140], long[:60], long}, "b: "+long[:100]
-		case 1:
-			item.Class, item.Status = ClassTechnical, StatusOpen
-		case 2:
-			item.Class, item.Status, item.Answer, item.AnswerQuote = ClassAnnounced, StatusAssumed, "ok", long[:80]
-		default:
-			settle++
-			item.Class, item.Status, item.Answer, item.AnswerQuote, item.Settled = ClassTechnical, StatusAnswered, "ok", long[:80], settle
-		}
-		st.Items = append(st.Items, item)
-	}
-	panels := samplePanels()
-	rows := make([]PanelRow, 20)
-	for i := range rows {
-		rows[i] = PanelRow{Label: fmt.Sprintf("key.%d", i), Text: long[:100]}
-	}
-	panels = append(panels, Panel{ID: "extra", Title: "Extra", Icon: "board", Count: "20", Rows: rows})
-	// The ticket panel lists every ready ticket with an absolute file: link,
-	// and its mailbox panel is one line.
-	tickets := make([]PanelRow, 100)
-	for i := range tickets {
-		tickets[i] = PanelRow{Label: "ready", Text: long[:100], Link: fmt.Sprintf("file:///home/someone/projects/a-long-repository-name/ai-docs/tickets/ready/2611%02d-feat-a-fairly-long-ticket-stem-%d.md", i%30, i)}
-	}
-	panels = append(panels,
-		Panel{ID: "tickets", Title: "Tickets", Icon: "board", Count: "100 ready", Rows: tickets},
-		Panel{ID: "mailbox", Title: "Mailbox", Icon: "mail", Count: "3 unread", Rows: []PanelRow{{Label: "someone@worktree", Text: "3 unread"}}},
-	)
-
-	out := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "size-check", Panels: panels}))
-	// The budget keeps the standalone board page small.
-	const budget = 2 << 20
-	t.Logf("populated page: %d bytes (%.1f%% of 2 MiB)", len(out), 100*float64(len(out))/budget)
-	// About a third of the limit: the stress is past any real board (60
-	// items and 100 ready tickets), with no truncation to fall back
-	// on. 35% left the topic bar's pen, note box, and updated time room;
-	// 40% adds the settled rows' expanded bodies (each settled item's
-	// rationale and options ride in the snapshot so it unfolds without script);
-	// 42% adds the check list's styles and answer staging; 43% its hide
-	// toggle (styles, icon, and script, about 2.7 KB a page); 44% the code
-	// blocks' wrap toggle (button, wrapped-line styles, and script, about 1.7 KB);
-	// 45% the topic stream's interleave styles (log rows with a clock column,
-	// folds, panel cards, and panel titles; about 6 KB); 46% the
-	// topic head (linked ticket badges and their status marks, the glow, the
-	// summary line and check pill, the stuck head's popover; about 3.2 KB);
-	// 47% the closed-more control's data-closed-more attribute (Decision 26,
-	// 261114-feat-ws-dashboard-board-toolbar-overview; about 0.2 KB).
-	if len(out) > budget*47/100 {
-		t.Errorf("populated page is %d bytes, not well under 2 MiB", len(out))
-	}
-}
-
-// TestRenderPagePanelRowLinks pins a panel row's link: a relative path and
-// a file: URL render as the provider built them (html/template would rewrite
-// an untrusted file: URL to #ZgotmplZ), while any other scheme keeps the
-// template's URL filtering, and a row without a link renders plain text.
-func TestRenderPagePanelRowLinks(t *testing.T) {
+// state clocks, forms, pills, code controls, and the shared viewer.
+func TestRenderRegionsPanelRowLinks(t *testing.T) {
 	panels := []Panel{{ID: "tickets", Title: "Tickets", Icon: "board", Rows: []PanelRow{
 		{Label: "ready", Text: "Relative", Link: "../tickets/ready/261106-feat-a.md"},
 		{Label: "ready", Text: "Absolute", Link: "file:///home/u/my%20repo/ai-docs/tickets/ready/261106-feat-b.md"},
@@ -857,10 +575,10 @@ func TestRenderPagePanelRowLinks(t *testing.T) {
 	}
 }
 
-// TestRenderPageTodoRowIcons pins the checklist boxes: each state shows its
+// TestRenderRegionsTodoRowIcons pins the checklist boxes: each state shows its
 // sprite symbol, never the old text marker, and folded rows sit behind a
 // closed "done N" details after the open rows.
-func TestRenderPageTodoRowIcons(t *testing.T) {
+func TestRenderRegionsTodoRowIcons(t *testing.T) {
 	panels := []Panel{{ID: "todo", Title: "Todos", Icon: "todo", Count: "1/4",
 		Rows: []PanelRow{
 			{State: "wip", Label: "a", Text: "Working"},
@@ -889,26 +607,18 @@ func TestRenderPageTodoRowIcons(t *testing.T) {
 	}
 }
 
-// TestOpenQuestionPill pins that the standalone page and dashboard's shared
-// form script carry the open-question pill.
+// TestOpenQuestionPill pins the open-question pill in shared assets.
 func TestOpenQuestionPill(t *testing.T) {
-	if out := render(t, sampleView(LayoutFull)); !strings.Contains(out, "data-wb-title") || !strings.Contains(out, ".oq-pill") {
-		t.Errorf("full page lacks the open-question pill script or style")
-	}
 	assets, err := PageAssets()
-	if err != nil || !strings.Contains(string(assets.FormScript), "data-wb-title") {
+	if err != nil || !strings.Contains(string(assets.FormScript), "wbTitleCount") || !strings.Contains(string(assets.CSS), ".oq-pill") {
 		t.Errorf("shared form script lacks the open-question pill (err %v)", err)
 	}
 }
 
-// TestTopicRail pins that the standalone page and dashboard's shared form
-// script carry the topic rail and the shared stylesheet carries its rules.
+// TestTopicRail pins the topic rail in shared assets.
 func TestTopicRail(t *testing.T) {
-	if out := render(t, sampleView(LayoutFull)); !strings.Contains(out, "window.wbRail") || !strings.Contains(out, ".wb-rail-wrap") {
-		t.Errorf("full page lacks the topic rail script or style")
-	}
 	assets, err := PageAssets()
-	if err != nil || !strings.Contains(string(assets.FormScript), "window.wbRail") {
+	if err != nil || !strings.Contains(string(assets.FormScript), "window.wbRail") || !strings.Contains(string(assets.CSS), ".wb-rail-wrap") {
 		t.Errorf("shared form script lacks the topic rail (err %v)", err)
 	}
 }
@@ -1070,22 +780,20 @@ func TestTopicRailEndOfBoard(t *testing.T) {
 	}
 }
 
-// A standalone page renders in the language its view names: the static text
-// (tooltips, the folded count) comes from the language's table, the board's
-// own content (titles, panel rows) stays as written, and the page carries the
-// client table its scripts read. A view with no language is English.
-func TestRenderPageFollowsViewLanguage(t *testing.T) {
+// Rendered regions use the view language for static text while preserving
+// board-authored content. A view with no language is English.
+func TestRenderRegionsFollowsViewLanguage(t *testing.T) {
 	en := render(t, sampleView(LayoutFull))
 	view := sampleView(LayoutFull)
 	view.Lang = "ko"
 	ko := render(t, view)
 
-	for _, want := range []string{`title="` + wsi18n.T("ko", "chip.answer") + `"`, `title="` + wsi18n.T("ko", "wb.allok") + `"`} {
+	for _, want := range []string{`title="` + wsi18n.T("ko", "chip.bulk.policy") + `"`, `title="` + wsi18n.T("ko", "wb.allok") + `"`} {
 		if !strings.Contains(ko, want) {
 			t.Errorf("Korean page lacks %q", want)
 		}
 	}
-	for _, english := range []string{wsi18n.T("en", "chip.answer"), wsi18n.T("en", "wb.allok")} {
+	for _, english := range []string{wsi18n.T("en", "chip.bulk.policy"), wsi18n.T("en", "wb.allok")} {
 		if !strings.Contains(en, `title="`+english+`"`) {
 			t.Errorf("English page lacks %q", english)
 		}
@@ -1093,23 +801,17 @@ func TestRenderPageFollowsViewLanguage(t *testing.T) {
 			t.Errorf("Korean page still carries the English %q", english)
 		}
 	}
-	if !strings.Contains(ko, `lang: "ko"`) || !strings.Contains(en, `lang: "en"`) {
-		t.Error("the page does not carry its language's client table")
-	}
 	for _, keep := range []string{"Tool surface decision 1", "첫 범위는 세션 보드 하나", "First mockup round"} {
 		if !strings.Contains(ko, keep) {
 			t.Errorf("Korean page lost board content %q", keep)
 		}
-	}
-	if strings.Contains(ko, " lang=") {
-		t.Error("the page sets a lang attribute")
 	}
 }
 
 // Link fields and readings are paths and identifiers: emphasis markers stay
 // literal there, while references, code spans, bare URLs and bare paths still
 // render.
-func TestRenderPageLinkFieldsAndReadingsKeepEmphasisLiteral(t *testing.T) {
+func TestRenderRegionsLinkFieldsAndReadingsKeepEmphasisLiteral(t *testing.T) {
 	const glob, ident = "rsrc/*.md and internal/*.go", "snake_case_name"
 	st := &State{Counter: 4, Seq: 3, SettleSeq: 4, Items: []Item{
 		{ID: 1, Class: ClassTechnical, Topic: "t", Title: "open", Status: StatusOpen,

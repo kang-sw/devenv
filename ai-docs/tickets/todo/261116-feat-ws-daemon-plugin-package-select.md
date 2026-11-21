@@ -1,5 +1,5 @@
 ---
-title: "Select the hosted-lead plugin package (ws or wsflow) with an explicit daemon setting"
+title: "명시적 데몬 설정으로 hosted lead 플러그인 패키지(ws 또는 wsflow) 선택"
 related:
   261116-feat-ws-dashboard-config-settings-ui: "a later dashboard editor for the setting; its G6 covers per-package manifest defaults"
   261112-feat-ws-mixed-version-compat-guards: "same shared-daemon starter/replacement mechanics; tier vocabulary"

@@ -75,6 +75,7 @@ func (c *hostedCLI) server(root string) *mcp.Server {
 	opts := mcp.ServerOptions{Root: root, Version: version, SourceCommit: sourceCommit,
 		Env: c.env, OwnerPID: c.hello.OwnerPID, Harness: c.hello.Harness, Diag: c.stderr}
 	if c.host != nil {
+		opts.BoardOwner = true
 		opts.Notes = c.host.notes
 		if c.host.nudges != nil {
 			opts.WhiteboardChanged = c.host.nudges.Poke
@@ -82,6 +83,9 @@ func (c *hostedCLI) server(root string) *mcp.Server {
 		if c.host.agents != nil {
 			if source, ok := c.host.agents.(mcp.AgentBackendRegistry); ok {
 				opts.AgentBackends = source
+			}
+			if reader, ok := c.host.agents.(mcp.WorktreeChildrenReader); ok {
+				opts.WorktreeChildren = reader
 			}
 			if strings.TrimSpace(c.getenv(wsagent.EnvPiToken)) == "" {
 				opts.Agents = c.host.agents

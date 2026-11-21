@@ -32,6 +32,26 @@ func TestPageSourceIncludesAllEmbeddedStyles(t *testing.T) {
 	}
 }
 
+// Every embedded stream fragment must participate in the served assembly.
+func TestPageSourceIncludesAllEmbeddedStreamScripts(t *testing.T) {
+	files, err := fs.Glob(assetFS, "assets/stream-*.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	included := make(map[string]bool, len(pageStreamFiles))
+	for _, name := range pageStreamFiles {
+		if included[name] {
+			t.Errorf("stream script %s is included more than once", name)
+		}
+		included[name] = true
+	}
+	for _, name := range files {
+		if !included[strings.TrimPrefix(name, "assets/")] {
+			t.Errorf("embedded stream script %s is missing from pageStreamFiles", name)
+		}
+	}
+}
+
 func TestPageSourceAssembly(t *testing.T) {
 	files := []string{"page.css", "page-items.css", "page-stream.css", "page-panel-diff.css", "page-panels.css", "page-sticky.css"}
 	var calls []string
@@ -55,8 +75,26 @@ func TestPageSourceAssembly(t *testing.T) {
 			t.Errorf("missing %s: got %v", missing, err)
 		}
 	}
-	raw, err = readPageSource(func(name string) ([]byte, error) { return []byte(name), nil }, "stream.js")
-	if err != nil || string(raw) != "stream.js" {
-		t.Fatalf("unsplit source = %q, %v", raw, err)
+	streamFiles := []string{"stream.js", "stream-navigation.js", "stream-view.js", "stream-panels.js", "stream-events.js"}
+	calls = nil
+	raw, err = readPageSource(func(name string) ([]byte, error) {
+		calls = append(calls, name)
+		return []byte("<" + name + ">"), nil
+	}, "stream.js")
+	want = "<" + strings.Join(streamFiles, "><") + ">"
+	if err != nil || string(raw) != want || strings.Join(calls, ",") != strings.Join(streamFiles, ",") {
+		t.Fatalf("stream assembly = %q, %v, reads %v; want %q, reads %v", raw, err, calls, want, streamFiles)
+	}
+	for _, missing := range streamFiles {
+		failure := errors.New("missing " + missing)
+		_, err := readPageSource(func(name string) ([]byte, error) {
+			if name == missing {
+				return nil, failure
+			}
+			return []byte(name), nil
+		}, "stream.js")
+		if !errors.Is(err, failure) {
+			t.Errorf("missing %s: got %v", missing, err)
+		}
 	}
 }

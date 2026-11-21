@@ -28,7 +28,7 @@ import (
 func TestCallFallbackRegistrationAndRenderDescriptor(t *testing.T) {
 	holders := wsholder.New(wsholder.Options{Dir: t.TempDir()})
 	defer holders.Close()
-	runner := newAgentRunner(t.TempDir(), io.Discard, nil, holders)
+	runner := newAgentRunner(t.TempDir(), io.Discard, nil, nil, holders)
 	defer runner.Close()
 	for name, reg := range runner.BackendRegistrations() {
 		if reg.CallFallback != (name == wsagent.BackendAgy) {
@@ -37,6 +37,38 @@ func TestCallFallbackRegistrationAndRenderDescriptor(t *testing.T) {
 		render := hostedRender(reg)
 		if render.CallFallback != reg.CallFallback || render.ToolNameScheme != reg.ToolNameScheme {
 			t.Fatalf("backend %q loses fallback or alias data in prompt rendering: %+v", name, render)
+		}
+	}
+}
+
+func TestHostedRestoreBundleMapsAgentChildProjection(t *testing.T) {
+	t.Setenv("WS_CACHE_HOME", t.TempDir())
+	t.Setenv("WS_CONFIG_HOME", t.TempDir())
+	root := t.TempDir()
+	runGit(t, root, "init")
+	key, err := mcp.NewAgentKeyStore().MintLead(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	children := []wsagent.AgentChild{
+		{
+			Address: "id:child-1", Label: "mapped child", Tier: "codex.large",
+			Authority: wsagent.PermissionWorkdirWrite, State: wsagent.AgentRunning,
+			Model: "gpt-fixture", Effort: "high", Cwd: filepath.Join(root, "child"), Held: 2,
+			Error: "fixture error", CreatedAt: "2026-11-20T00:00:00Z", LastReport: "done: mapped report",
+		},
+	}
+	got, err := renderHostedRestoreBundle(mcp.HostedRender{Harness: "claude"}, root, key, wsagent.RestoreRestart, children)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"Your ws session key is `" + key + "`", "The daemon restarted.",
+		"id:child-1 (mapped child): running; tier=codex.large; authority=workdir-write",
+		"last=done: mapped report", "error=fixture error",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("mapped restore bundle lacks %q:\n%s", want, got)
 		}
 	}
 }
@@ -113,7 +145,7 @@ func TestAgentMCPHostedWorkerKeepsTokenForwarding(t *testing.T) {
 	}
 	holders := wsholder.New(wsholder.Options{Dir: t.TempDir()})
 	defer holders.Close()
-	runner := newAgentRunner(t.TempDir(), io.Discard, nil, holders)
+	runner := newAgentRunner(t.TempDir(), io.Discard, nil, nil, holders)
 	defer runner.Close()
 	host := &proxyHost{agents: runner, logw: io.Discard}
 	session, err := host.Accept(wsdashboard.ProxyHello{
@@ -199,7 +231,7 @@ func TestAgentMCPHostedWorkerDescriptorThroughProxy(t *testing.T) {
 
 			holders := wsholder.New(wsholder.Options{Dir: t.TempDir()})
 			defer holders.Close()
-			runner := newAgentRunner(dashDir, io.Discard, nil, holders)
+			runner := newAgentRunner(dashDir, io.Discard, nil, nil, holders)
 			defer runner.Close()
 			host := &proxyHost{agents: runner, logw: io.Discard}
 			session, err := host.Accept(wsdashboard.ProxyHello{
@@ -384,7 +416,7 @@ func TestAgentMCPPythonResolution(t *testing.T) {
 func TestAgentRunnerCatalogs(t *testing.T) {
 	holders := wsholder.New(wsholder.Options{Dir: t.TempDir()})
 	defer holders.Close()
-	runner := newAgentRunner(t.TempDir(), io.Discard, nil, holders)
+	runner := newAgentRunner(t.TempDir(), io.Discard, nil, nil, holders)
 	defer runner.Close()
 	regs := runner.BackendRegistrations()
 	if !reflect.DeepEqual(regs[wsagent.BackendClaude].Catalog, wsagent.ClaudeCatalog()) {
@@ -395,6 +427,9 @@ func TestAgentRunnerCatalogs(t *testing.T) {
 	}
 	if !reflect.DeepEqual(regs[wsagent.BackendCodex].Catalog, wsagent.CodexCatalog()) {
 		t.Error("codex must retain its lead and worker catalog")
+	}
+	if !reflect.DeepEqual(regs[wsagent.BackendCodex].PermissionLevels, wsagent.LeadPermissionLevels()) {
+		t.Errorf("codex common permission levels = %v", regs[wsagent.BackendCodex].PermissionLevels)
 	}
 	if !reflect.DeepEqual(regs[wsagent.BackendAgy].Catalog, wsagent.AgyCatalog()) {
 		t.Error("agy must retain its lead and worker catalog")

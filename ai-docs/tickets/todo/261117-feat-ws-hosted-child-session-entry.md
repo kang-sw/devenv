@@ -1,5 +1,5 @@
 ---
-title: "Hosted child session entry: click any ws/agent.spawn child in the dashboard and enter its session, for every harness"
+title: "hosted 자식 세션 진입: 모든 하네스에서 dashboard 내 ws/agent.spawn 자식 세션 클릭 진입"
 parent: 261114-epic-ws-common-session-foundation
 related:
   261117-feat-ws-agent-tools-mailbox-routing: "prerequisite; agent.spawn children and lineage are what the dashboard lists"

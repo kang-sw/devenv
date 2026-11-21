@@ -24,7 +24,7 @@ const [base, updates] = process.argv.slice(2);
     });
     await page.goto(base + '/');
     const row = page.locator('#r-rail .rs[data-rid="livesession"]');
-    await row.locator('.rrun').waitFor();
+    await row.locator('.hbr').waitFor();
     await page.waitForTimeout(300);
     await row.locator('.rl').focus();
     await page.locator('.shp').waitFor({ state: 'visible' });
@@ -32,7 +32,7 @@ const [base, updates] = process.argv.slice(2);
       const rail = document.querySelector('#r-rail');
       window.railBefore = {
         row: rail.querySelector('.rs[data-rid="livesession"]'),
-        spinner: rail.querySelector('.rs[data-rid="livesession"] .rrun'),
+        spinner: rail.querySelector('.rs[data-rid="livesession"] .hbr'),
         list: rail.querySelector('#rlist'), focus: document.activeElement,
         other: rail.querySelector('.rs[data-rid="boardsession"]'),
         hash: rail.getAttribute('data-h'), classMutations: 0
@@ -55,7 +55,7 @@ const [base, updates] = process.argv.slice(2);
     assert.deepEqual(await page.evaluate(() => {
       const r = document.querySelector('#r-rail'), b = window.railBefore;
       return [r.querySelector('.rs[data-rid="livesession"]') === b.row,
-        r.querySelector('.rs[data-rid="livesession"] .rrun') === b.spinner,
+        r.querySelector('.rs[data-rid="livesession"] .hbr') === b.spinner,
         r.querySelector('#rlist') === b.list, document.activeElement === b.focus,
         r.getAttribute('data-h') !== b.hash, b.classMutations];
     }), [true, true, true, true, true, 0], 'hover-only push keeps rows, spinner, scroll container and focus without re-marking');
@@ -68,13 +68,13 @@ const [base, updates] = process.argv.slice(2);
     // A genuine status change still lands, and becomes the next comparison baseline.
     await update('?idle=1');
     assert.equal(await page.evaluate(() => document.querySelector('#r-rail .rs[data-rid="boardsession"]') === window.railBefore.other), true, 'unchanged row survives a visible status delta');
-    assert.equal(await row.locator('.rrun').count(), 0, 'real row update removes working state');
+    assert.equal(await row.locator('.hbr').count(), 0, 'real row update removes working state');
     assert.equal(await page.evaluate(() => document.querySelector('#r-rail .rs[data-rid="livesession"]') === window.railBefore.row), false);
     await update();
-    await row.locator('.rrun').waitFor();
-    await page.evaluate(() => { window.nextSpinner = document.querySelector('#r-rail .rs[data-rid="livesession"] .rrun'); });
+    await row.locator('.hbr').waitFor();
+    await page.evaluate(() => { window.nextSpinner = document.querySelector('#r-rail .rs[data-rid="livesession"] .hbr'); });
     await update();
-    assert.equal(await page.evaluate(() => document.querySelector('#r-rail .rs[data-rid="livesession"] .rrun') === window.nextSpinner), true);
+    assert.equal(await page.evaluate(() => document.querySelector('#r-rail .rs[data-rid="livesession"] .hbr') === window.nextSpinner), true);
 
     assert.ok(await page.evaluate(() => window.railWire.some(m => m.event === 'rail-rows' && m.data.rows.length === 1 && m.data.rows[0].key === 'livesession')), 'production connection opted into changed-row events');
     // Hidden tabs accumulate canonical inputs, not patches against stale DOM.
@@ -87,10 +87,10 @@ const [base, updates] = process.argv.slice(2);
       const { at } = await (await fetch(updates + query)).json(); finalAt = at;
       await page.waitForFunction(at => window.railWire.some(m => m.event === 'rail-rows' && m.data.rows.some(r => r.html.includes('data-ms="' + at + '"'))), at);
     }
-    assert.equal(await row.locator('.rrun').count(), 1, 'hidden deltas did not touch live DOM');
+    assert.equal(await row.locator('.hbr').count(), 1, 'hidden deltas did not touch live DOM');
     await page.evaluate(() => { window.testHidden = false; document.dispatchEvent(new Event('visibilitychange')); });
     await page.waitForFunction(at => document.querySelector('#r-rail .rs[data-rid="livesession"] template').innerHTML.includes('data-ms="' + at + '"'), finalAt);
-    assert.equal(await row.locator('.rrun').count(), 0, 'newest hidden status applied');
+    assert.equal(await row.locator('.hbr').count(), 0, 'newest hidden status applied');
     assert.equal(await page.evaluate(() => document.querySelector('#r-rail .rs[data-rid="boardsession"]') === window.railBefore.other), true, 'hidden accumulation keeps unchanged rows');
 
     // Exercise the helper with escaped content, reordered sources, and changed

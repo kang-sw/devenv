@@ -2,13 +2,18 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/kang-sw/devenv/internal/wsagent"
 	"github.com/kang-sw/devenv/internal/wsgit"
 )
 
@@ -244,4 +249,281 @@ func TestWorktreeReleaseSlowHookAllowsOtherWorktrees(t *testing.T) {
 			assertAcquiredLease(t, s, later, "impl/test/later", parent)
 		})
 	}
+}
+
+type fakeWorktreeChildren struct {
+	mu       sync.Mutex
+	byTarget map[string][]wsagent.BoundWorktreeChild
+}
+
+func (f *fakeWorktreeChildren) set(target string, children ...wsagent.BoundWorktreeChild) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.byTarget == nil {
+		f.byTarget = map[string][]wsagent.BoundWorktreeChild{}
+	}
+	key := canonicalWorktreeTestPath(target)
+	if len(children) == 0 {
+		delete(f.byTarget, key)
+		return
+	}
+	f.byTarget[key] = append([]wsagent.BoundWorktreeChild(nil), children...)
+}
+
+func (f *fakeWorktreeChildren) ActiveChildrenInWorktree(worktree string) []wsagent.BoundWorktreeChild {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]wsagent.BoundWorktreeChild(nil), f.byTarget[canonicalWorktreeTestPath(worktree)]...)
+}
+
+func canonicalWorktreeTestPath(p string) string {
+	p = filepath.Clean(strings.TrimSpace(p))
+	if resolved, err := filepath.EvalSymlinks(p); err == nil {
+		return filepath.Clean(resolved)
+	}
+	return p
+}
+
+// TestWorktreeReleaseRefusesLiveDirectAndNestedBoundChildren verifies that
+// non-forced release refuses while a direct child, nested grandchild, or
+// waiting non-closed child is bound to the target worktree — even when the
+// caller owns the worktree lease — naming each child address and leaving the
+// worktree untouched, while force: true still overrides.
+func TestWorktreeReleaseRefusesLiveDirectAndNestedBoundChildren(t *testing.T) {
+	s, base, leadA, _ := releaseGuardServer(t)
+	children := &fakeWorktreeChildren{}
+	s.pi.worktreeChildren = children
+
+	acq := acquireForTest(t, s, 1, leadA, base, "impl/test/bound-child")
+	draft := writeDraft(t, acq.Path)
+
+	for i, tc := range []struct {
+		name   string
+		active []wsagent.BoundWorktreeChild
+		want   []string
+	}{
+		{
+			name:   "live direct child",
+			active: []wsagent.BoundWorktreeChild{{Address: "id:directchild01", State: wsagent.AgentRunning, Cwd: acq.Path}},
+			want:   []string{"id:directchild01", "running", "Nothing was changed", "force: true"},
+		},
+		{
+			name: "live nested grandchild",
+			active: []wsagent.BoundWorktreeChild{
+				{Address: "id:directchild01", State: wsagent.AgentWaiting, Cwd: acq.Path},
+				{Address: "id:grandchild02", State: wsagent.AgentRunning, Cwd: acq.Path},
+			},
+			want: []string{"id:directchild01", "waiting", "id:grandchild02", "running", "Nothing was changed"},
+		},
+		{
+			name:   "waiting non-closed child",
+			active: []wsagent.BoundWorktreeChild{{Address: "id:waitingchild03", State: wsagent.AgentWaiting, Cwd: acq.Path}},
+			want:   []string{"id:waitingchild03", "waiting", "Nothing was changed"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			children.set(acq.Path, tc.active...)
+			rel := callToolOnce(t, s, 10+i, "worktree.release", map[string]any{"session_key": leadA, "path": acq.Path})
+			if !toolIsError(t, rel) {
+				t.Fatalf("release with %s must be refused: %s", tc.name, rel)
+			}
+			text := toolText(t, rel)
+			for _, w := range tc.want {
+				if !strings.Contains(text, w) {
+					t.Fatalf("refusal missing %q: %s", w, text)
+				}
+			}
+			if _, err := os.Stat(draft); err != nil {
+				t.Fatalf("refused release wiped uncommitted draft: %v", err)
+			}
+			if b := wtBranch(t, acq.Path); b != "impl/test/bound-child" {
+				t.Fatalf("refused release changed branch to %q", b)
+			}
+			lease, err := readWorktreeLease(context.Background(), wsgit.ExecRunner{}, acq.Path)
+			if err != nil || lease == nil || lease.WorkerKey != acq.WorkerKey {
+				t.Fatalf("refused release dropped lease: %+v err=%v", lease, err)
+			}
+		})
+	}
+
+	// force: true still releases despite a non-closed bound child.
+	children.set(acq.Path, wsagent.BoundWorktreeChild{Address: "id:forcedchild04", State: wsagent.AgentRunning, Cwd: acq.Path})
+	if rel := callToolOnce(t, s, 30, "worktree.release", map[string]any{"session_key": leadA, "path": acq.Path, "force": true}); toolIsError(t, rel) {
+		t.Fatalf("forced release with bound child failed: %s", rel)
+	}
+	if _, err := os.Stat(draft); !os.IsNotExist(err) {
+		t.Fatalf("forced release did not clean draft: %v", err)
+	}
+	if b := wtBranch(t, acq.Path); b != "HEAD" {
+		t.Fatalf("forced release did not detach HEAD: %q", b)
+	}
+}
+
+// TestWorktreeReleaseFromTokenBearingWorkerReachesDaemonGuard verifies that a
+// release issued from a spawned agent's attached MCP server (no local runner
+// handle, only EnvPiToken + EnvPiEndpoint) queries the daemon's token route
+// rather than skipping the bound-child guard, fails closed if the daemon
+// rejects/errors, and succeeds once no bound child remains (or with force).
+func TestWorktreeReleaseFromTokenBearingWorkerReachesDaemonGuard(t *testing.T) {
+	sLead, root, base, leadKey := worktreeListServer(t)
+	acq := acquireForTest(t, sLead, 1, leadKey, base, "impl/test/token-worker")
+	draft := writeDraft(t, acq.Path)
+
+	var mu sync.Mutex
+	var active []wsagent.BoundWorktreeChild
+	var statusCode int
+	var queriedWorktrees []string
+	daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != wsagent.RoutePrefix+"/by-token/worktree.children" || r.Header.Get("Authorization") != "Bearer worker-tok" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		var body struct {
+			Worktree string `json:"worktree"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		mu.Lock()
+		queriedWorktrees = append(queriedWorktrees, body.Worktree)
+		code := statusCode
+		list := append([]wsagent.BoundWorktreeChild(nil), active...)
+		mu.Unlock()
+		if code != 0 && code != http.StatusOK {
+			http.Error(w, "daemon check failed", code)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"children": list})
+	}))
+	defer daemon.Close()
+
+	// Build a connection-local server with NO local runner or WorktreeChildren,
+	// only the worker capability token and daemon endpoint.
+	workerServer := NewServerWithOptions(ServerOptions{
+		Root: root, Version: "test",
+		Env: append(sLead.environ(),
+			wsagent.EnvPiToken+"=worker-tok",
+			wsagent.EnvPiEndpoint+"="+daemon.URL,
+		),
+	})
+	defer workerServer.Close()
+
+	// 1. Live bound child reported by daemon blocks non-forced release.
+	mu.Lock()
+	active = []wsagent.BoundWorktreeChild{{Address: "id:nestedkid99", State: wsagent.AgentRunning, Cwd: acq.Path}}
+	mu.Unlock()
+	rel := callToolOnce(t, workerServer, 10, "worktree.release", map[string]any{"session_key": acq.WorkerKey, "path": acq.Path})
+	if !toolIsError(t, rel) || !strings.Contains(toolText(t, rel), "id:nestedkid99") || !strings.Contains(toolText(t, rel), "Nothing was changed") {
+		t.Fatalf("token-bearing worker release must be blocked by daemon guard: %s", rel)
+	}
+	if _, err := os.Stat(draft); err != nil {
+		t.Fatalf("blocked release deleted draft: %v", err)
+	}
+
+	// 2. Daemon error fails closed on non-forced release.
+	mu.Lock()
+	active = nil
+	statusCode = http.StatusInternalServerError
+	mu.Unlock()
+	relErr := callToolOnce(t, workerServer, 11, "worktree.release", map[string]any{"session_key": acq.WorkerKey, "path": acq.Path})
+	if !toolIsError(t, relErr) || !strings.Contains(toolText(t, relErr), "could not check bound child agents") {
+		t.Fatalf("daemon error must fail closed: %s", relErr)
+	}
+	if _, err := os.Stat(draft); err != nil {
+		t.Fatalf("failed-closed release deleted draft: %v", err)
+	}
+
+	// 3. Once daemon reports no bound children, release succeeds.
+	mu.Lock()
+	statusCode = http.StatusOK
+	mu.Unlock()
+	if relOK := callToolOnce(t, workerServer, 12, "worktree.release", map[string]any{"session_key": acq.WorkerKey, "path": acq.Path}); toolIsError(t, relOK) {
+		t.Fatalf("release after bound child closed failed: %s", relOK)
+	}
+	if b := wtBranch(t, acq.Path); b != "HEAD" {
+		t.Fatalf("released worktree not detached: %q", b)
+	}
+	mu.Lock()
+	if len(queriedWorktrees) < 3 {
+		t.Fatalf("expected daemon worktree.children queries, got %v", queriedWorktrees)
+	}
+	mu.Unlock()
+}
+
+// TestWorktreeReleaseRacesAgentSpawnOnSameWorktree verifies both directions of
+// the shared per-worktree admission boundary:
+//  1. While release holds the exclusive per-worktree lock (paused in a
+//     pre_release hook before hygiene), agent.spawn's worktree reservation is
+//     immediately refused with ErrWorktreeReleasing.
+//  2. While agent.spawn holds the shared worktree reservation and registers a
+//     bound child before releasing it, a concurrent non-forced worktree.release
+//     waits for the spawn to publish the child, sees it under the lock, and
+//     refuses without modifying the worktree.
+func TestWorktreeReleaseRacesAgentSpawnOnSameWorktree(t *testing.T) {
+	t.Run("spawn blocked while release holds reservation", func(t *testing.T) {
+		s, root, base, parent := worktreeListServer(t)
+		pool := acquireTempDir(t)
+		gate := filepath.Join(t.TempDir(), "release-race")
+		t.Setenv("WS_TEST_ACQUIRE_HOOK_GATE", gate)
+		profile := hookProfile(t, "race-release", nil, map[string][]map[string]any{
+			worktreeHookPreRelease: {hook([]string{os.Args[0], "-test.run=^TestWorktreeAcquireGateHook$"})},
+		})
+		target, err := acquireWithServer(context.Background(), s, s.gitRunner(), root, base, "impl/test/race-a", profile, pool, parent)
+		if err != nil {
+			t.Fatal(err)
+		}
+		done := make(chan struct{})
+		var releaseErr error
+		t.Cleanup(func() { _ = os.WriteFile(gate+".resume", nil, 0o600); <-done })
+		go func() {
+			_, releaseErr = releaseWorktreeAs(context.Background(), s.gitRunner(), s.environ(), target.Path, pool, lookupOf(profile), &worktreeReleaseCaller{LeadKey: parent})
+			close(done)
+		}()
+		waitAcquireGate(t, gate+".held")
+		if unlock, err := wsgit.ReserveWorktreeSpawn(target.Path); !errors.Is(err, wsgit.ErrWorktreeReleasing) {
+			if unlock != nil {
+				unlock()
+			}
+			t.Fatalf("spawn reservation during active release = %v, want ErrWorktreeReleasing", err)
+		}
+		if err := os.WriteFile(gate+".resume", nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		<-done
+		if releaseErr != nil {
+			t.Fatalf("release failed: %v", releaseErr)
+		}
+	})
+
+	t.Run("release waits for in-flight spawn and sees newly bound child", func(t *testing.T) {
+		s, base, leadA, _ := releaseGuardServer(t)
+		children := &fakeWorktreeChildren{}
+		s.pi.worktreeChildren = children
+		acq := acquireForTest(t, s, 1, leadA, base, "impl/test/race-b")
+		draft := writeDraft(t, acq.Path)
+
+		unlockSpawn, err := wsgit.ReserveWorktreeSpawn(acq.Path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		releaseDone := make(chan string, 1)
+		go func() {
+			releaseDone <- callToolOnce(t, s, 2, "worktree.release", map[string]any{"session_key": leadA, "path": acq.Path})
+		}()
+		// Give release time to contend on the per-worktree lock while the
+		// in-flight spawn registers its child, then release the spawn lock.
+		time.Sleep(100 * time.Millisecond)
+		children.set(acq.Path, wsagent.BoundWorktreeChild{Address: "id:racedchild01", State: wsagent.AgentStarting, Cwd: acq.Path})
+		unlockSpawn()
+
+		rel := <-releaseDone
+		if !toolIsError(t, rel) || !strings.Contains(toolText(t, rel), "id:racedchild01") {
+			t.Fatalf("release racing in-flight spawn must see newly registered child and refuse: %s", rel)
+		}
+		if _, err := os.Stat(draft); err != nil {
+			t.Fatalf("raced release wiped uncommitted draft: %v", err)
+		}
+		if b := wtBranch(t, acq.Path); b != "impl/test/race-b" {
+			t.Fatalf("raced release changed branch to %q", b)
+		}
+	})
 }

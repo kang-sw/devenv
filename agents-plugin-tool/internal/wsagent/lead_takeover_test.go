@@ -465,6 +465,8 @@ func TestResumeCommand(t *testing.T) {
 		{Record{Lead: true, Backend: BackendClaude, Root: "/w/repo", SessionID: "abc-1"}, "cd /w/repo && claude --resume abc-1"},
 		{Record{Lead: true, Backend: BackendClaude, Root: "/w/repo", Cwd: "/w/my repo/it's", SessionID: "abc-1"}, `cd '/w/my repo/it'\''s' && claude --resume abc-1`},
 		{Record{Lead: true, Backend: BackendClaude, Root: "/w/repo"}, ""},
+		{Record{Lead: true, Backend: BackendAgy, Root: "/w/repo", SessionID: "agy 1"}, "cd /w/repo && agy --conversation 'agy 1'"},
+		{Record{Lead: true, Backend: BackendAgy, Root: "/w/repo"}, ""},
 		{Record{Lead: true, Backend: BackendPi, Root: "/w/repo", SessionFile: "/h/.pi/s 1.jsonl"}, "cd /w/repo && pi --session '/h/.pi/s 1.jsonl'"},
 		// A pi session the daemon started has no file until its first run.
 		{Record{Lead: true, Backend: BackendPi, Root: "/w/repo"}, ""},

@@ -88,3 +88,43 @@ test('history input is sorted without mutation, deduplicated and filtered to the
   assert.equal(trend([sample(-.1, 0), a, b], b).points.length, 2);
   assert.equal(trend([a, b, sample(.3, 30)], b).points.length, 2);
 });
+
+test('agy per-group trend isolates samples by group identity within shared harness', () => {
+  const gemA = { harness: 'agy', group: 'gemini', kind: 'five_hour', source: 'via agy CLI', resetsAt: reset, asOf: start + .1 * duration, percent: 10 };
+  const gemB = { harness: 'agy', group: 'gemini', kind: 'five_hour', source: 'via agy CLI', resetsAt: reset, asOf: start + .3 * duration, percent: 45 };
+  const cgA = { harness: 'agy', group: 'claude_gpt', kind: 'five_hour', source: 'via agy CLI', resetsAt: reset, asOf: start + .2 * duration, percent: 90 };
+  const cgB = { harness: 'agy', group: 'claude_gpt', kind: 'five_hour', source: 'via agy CLI', resetsAt: reset, asOf: start + .3 * duration, percent: 95 };
+  const history = { schema_version: 1, status: 'ok', samples: [gemA, cgA, gemB, cgB] };
+  const gemResult = window.WsUsage.trend(
+    { harness: 'agy', group: 'gemini', source: 'via agy CLI', asOf: gemB.asOf },
+    { kind: 'five_hour', percent: gemB.percent, resetsAt: reset, asOf: gemB.asOf },
+    history
+  );
+  assert.deepEqual(Array.from(gemResult.points, p => p.percent), [10, 45]);
+  const cgResult = window.WsUsage.trend(
+    { harness: 'agy', group: 'claude_gpt', source: 'via agy CLI', asOf: cgB.asOf },
+    { kind: 'five_hour', percent: cgB.percent, resetsAt: reset, asOf: cgB.asOf },
+    history
+  );
+  assert.deepEqual(Array.from(cgResult.points, p => p.percent), [90, 95]);
+});
+
+test('codex five_hour trend isolates five_hour history from seven_day history', () => {
+  const c5a = { harness: 'codex', kind: 'five_hour', source: 'via Codex CLI', resetsAt: reset, asOf: start + .1 * duration, percent: 12 };
+  const c5b = { harness: 'codex', kind: 'five_hour', source: 'via Codex CLI', resetsAt: reset, asOf: start + .3 * duration, percent: 26 };
+  const c7 = { harness: 'codex', kind: 'seven_day', source: 'via Codex CLI', resetsAt: reset + 86400000, asOf: start + .2 * duration, percent: 48 };
+  const codexFiveHourHistory = { schema_version: 1, status: 'ok', samples: [c5a, c5b] };
+  const sharedHistory = { schema_version: 1, status: 'ok', samples: [c7] };
+  const fiveResult = window.WsUsage.trend(
+    { harness: 'codex', source: 'via Codex CLI', asOf: c5b.asOf },
+    { kind: 'five_hour', percent: c5b.percent, resetsAt: reset, asOf: c5b.asOf },
+    codexFiveHourHistory
+  );
+  assert.deepEqual(Array.from(fiveResult.points, p => p.percent), [12, 26]);
+  const weeklyResult = window.WsUsage.trend(
+    { harness: 'codex', source: 'via Codex CLI', asOf: c7.asOf },
+    { kind: 'seven_day', percent: c7.percent, resetsAt: c7.resetsAt, asOf: c7.asOf },
+    sharedHistory
+  );
+  assert.deepEqual(Array.from(weeklyResult.points, p => p.percent), [48]);
+});

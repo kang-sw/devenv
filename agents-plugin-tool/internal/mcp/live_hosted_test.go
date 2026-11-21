@@ -3,6 +3,7 @@ package mcp
 import (
 	"encoding/json"
 	"net/http"
+	"os"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -158,6 +159,34 @@ func TestHostedLiveHandsSnapshotsOverInMemory(t *testing.T) {
 	if err != nil || snap.UpdatedAt < last[len(last)-1].UpdatedAt || snap.Lead.Phase != last[len(last)-1].Lead.Phase {
 		t.Fatalf("flushed snapshot = %+v, %v; last published %+v", snap.Lead, err, last[len(last)-1].Lead)
 	}
+}
+
+func TestHostedLiveOutputRateDefersSidecarToRecoveryFlush(t *testing.T) {
+	f := newLiveFixture(t, true)
+	fastLive(t, 5*time.Millisecond)
+	host := &fakeLiveHost{serve: true}
+	f.server.live.host = host
+	directIntake(t, f.server, f.keyA, map[string]any{"kind": "turn_start"})
+	slot := host.slot(t)
+	waitFor(t, "initial hosted snapshot", func() bool { return len(slot.published()) > 0 })
+
+	directIntake(t, f.server, f.keyA, map[string]any{
+		"kind":       "status",
+		"outputRate": map[string]any{"outputTps": 42.0, "at": 1000},
+	})
+	waitFor(t, "rate in hosted RAM", func() bool {
+		snaps := slot.published()
+		return len(snaps) > 0 && snaps[len(snaps)-1].Lead.OutputRate != nil
+	})
+	if _, err := os.Stat(wslive.OutputRatePath(f.sessionDir(f.replyA))); !os.IsNotExist(err) {
+		t.Fatalf("output-rate sidecar written on intake: %v", err)
+	}
+
+	directIntake(t, f.server, f.keyA, map[string]any{"kind": "turn_end"})
+	waitFor(t, "rate recovery append", func() bool {
+		rate, _ := wslive.ReadOutputRate(f.sessionDir(f.replyA))
+		return rate != nil && rate.OutputTps == 42
+	})
 }
 
 // TestHostedLiveIdleHeartbeatWritesNothing pins the idle cost of a hosted

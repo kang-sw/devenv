@@ -1,5 +1,5 @@
 ---
-title: git.commit cannot place a commit trailer such as Co-Authored-By
+title: "git.commit이 Co-Authored-By 같은 커밋 트레일러를 배치하지 못하는 문제"
 ---
 
 # git.commit cannot place a commit trailer such as Co-Authored-By

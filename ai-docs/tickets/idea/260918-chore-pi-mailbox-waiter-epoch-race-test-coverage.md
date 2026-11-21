@@ -1,5 +1,5 @@
 ---
-title: pi mailbox waiter epoch-race guard has no regression test (lifecycle harness missing)
+title: "pi mailbox waiter epoch-race 가드에 회귀 테스트 누락 (수명주기 하네스 부재)"
 related:
   260917-feat-ws-pi-mailbox-waiter-slug-wake: origin — the guard this ticket wants to test
 ---

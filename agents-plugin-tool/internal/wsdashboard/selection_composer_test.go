@@ -105,7 +105,20 @@ func selectionProductionRuntime(t *testing.T) string {
 	source += storageInit
 	source += selectionActualSource(t, read("dashboard-board.js"), []string{"boardSeen =", "boardOwn =", "boardChanges ="}, []string{"boardFlushViewed"}, false)
 	source += read("dashboard-bundles.js")
-	source += selectionActualSource(t, read("dashboard-composer.js"), nil, nil, true)
+	var composer strings.Builder
+	collectComposer := false
+	for _, name := range dashboardScriptFiles {
+		if name == "dashboard-composer.js" {
+			collectComposer = true
+		}
+		if name == "dashboard-actions.js" {
+			break
+		}
+		if collectComposer {
+			composer.WriteString(mustAsset(t, name))
+		}
+	}
+	source += selectionActualSource(t, composer.String(), nil, nil, true)
 	source += selectionActualSource(t, read("dashboard-tracker.js"), []string{"capsuleTopicLoad ="}, []string{"paletteText", "capsuleTopics"}, false)
 	source += selectionActualSource(t, read("dashboard-rail.js"), []string{"railEl =", "railStore ="}, nil, false)
 	source += selectionDraftSource(t)
@@ -136,6 +149,9 @@ Object.assign(host.context,{require,process,TextEncoder,El:host.El,Event:host.Ev
 vm.runInContext(`+quoted(selectionRuntimeEnvironment)+`,host.context);
 ['toast.js','mention.js','capsules.js','rail.js'].forEach(n=>vm.runInContext(fs.readFileSync(path.join('assets',n),'utf8'),host.context));
 vm.runInContext(`+quoted(selectionProductionRuntime(t))+`,host.context);
+// These cases retain the separate-chip fallback path; the browser suite
+// exercises the live inline editor and its ordered capsule delivery.
+vm.runInContext('inlineEditor = function(){ return null; };',host.context);
 Promise.resolve(vm.runInContext(`+quoted("(async function(){\n"+body+"\n})()")+`,host.context)).catch(e=>{console.error(e);process.exitCode=1;});
 `)
 }

@@ -87,14 +87,25 @@ type SpawnSpec struct {
 	// spawns may ask for (children.go). Empty records none, and such a
 	// conversation spawns nothing.
 	Tier string
-	// Authority is an agent.spawn child's permission level, stored as its
-	// explicit selection (permission.json) and re-admitted against its
-	// parent's level at every process start (agent_tools.go). Empty
-	// stores none.
-	Authority PermissionLevel
+	// PermissionLevel is this worker's common permission input. A non-empty
+	// value is stored as its explicit selection (permission.json); omission
+	// keeps legacy derivation with no writeback. Every child is re-admitted
+	// against its parent's current level at creation and process start.
+	PermissionLevel PermissionLevel
+	// PermissionFullAck accompanies a trusted user's explicit full choice.
+	// It is not authority by itself; only the package's trusted control owner
+	// may set permissionUser.
+	PermissionFullAck bool
+	permissionUser    bool
+	// delegatedAuthority is set only by agent.spawn, whose authority is an
+	// already-bounded delegation rather than a generic worker raise.
+	delegatedAuthority bool
 	// SystemPrompt is appended to the harness's system prompt at every
 	// process start; empty is none.
 	SystemPrompt string
+	// claimWidth transfers an AgentSpawn width reservation when startConv
+	// registers the conversation under r.mu.
+	claimWidth func()
 }
 
 // apply sets the spawn's choices on a new conversation's record.
@@ -140,7 +151,10 @@ func (r *Runner) Spawn(spec SpawnSpec) (State, error) {
 	if p := spec.Parent; p != nil && (strings.TrimSpace(p.Kind) == "" || !wsdashboard.ValidReplyID(p.ReplyID)) {
 		return State{}, badRequest("parent must name a kind and a valid reply-id")
 	}
-	if isAgentWorkerProfile(strings.TrimSpace(spec.Profile)) && (spec.Parent == nil || spec.Authority.rank() == 0) {
+	if spec.PermissionLevel != "" && spec.PermissionLevel.rank() == 0 {
+		return State{}, badRequest("permission_level must be read-only, workdir-write or full")
+	}
+	if isAgentWorkerProfile(strings.TrimSpace(spec.Profile)) && (spec.Parent == nil || spec.PermissionLevel.rank() == 0) {
 		// Its ceiling is its authority (agent_tools.go): a spawn without
 		// one would run the common loadout unchecked.
 		return State{}, badRequest("profile %q is agent.spawn's internal profile: it needs a parent and an authority", spec.Profile)
@@ -211,6 +225,9 @@ func cleanLabel(label string) string {
 // open.
 func (r *Runner) spawned(c *conv, prompt string) (State, error) {
 	st, err := r.Send(c.rec.ReplyID, prompt)
+	c.mu.Lock()
+	c.spawnPending = false
+	c.mu.Unlock()
 	if err != nil {
 		_, _ = r.CloseConversation(c.rec.ReplyID)
 		return State{}, err

@@ -98,10 +98,23 @@ func installedPiVersion() (string, error) {
 	return cache.version, cache.err
 }
 
+// WorktreeChildrenReader queries the daemon's runner for non-closed
+// conversations bound to a worktree. Set for every daemon-hosted server
+// (including token-forwarding workers) without granting the lead runner handle.
+type WorktreeChildrenReader interface {
+	ActiveChildrenInWorktree(worktree string) []wsagent.BoundWorktreeChild
+}
+
+// HasWorktreeChildrenReader reports whether this server holds a direct
+// daemon-side bound-child reader (for wiring tests).
+func (s *Server) HasWorktreeChildrenReader() bool { return s.pi.worktreeChildren != nil }
+
 // piHost is the server's side of the pi.* tools.
 type piHost struct {
 	// agents is the daemon's runner; nil on the direct path.
 	agents PiAgents
+	// worktreeChildren reads daemon-wide bound children for worktree.release.
+	worktreeChildren WorktreeChildrenReader
 	// stopWatch ends the live feed's runner subscription (Server.Close).
 	stopWatch func()
 

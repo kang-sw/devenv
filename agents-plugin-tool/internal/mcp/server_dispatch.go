@@ -102,7 +102,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 	if !s.toolAllowed(params.Name) {
 		return errorResponse(req.ID, -32601, fmt.Sprintf("tool not available in current %s MCP profile: %s", s.runtimeNamespace(), params.Name))
 	}
-	if refusal := s.permissionRefusal(params.Name); refusal != "" {
+	if refusal := s.permissionRefusal(params.Name, params.Arguments); refusal != "" {
 		return toolErrorTextResponse(req.ID, refusal)
 	}
 	// Keyed capability gate: when a session_key is present and maps to a known
@@ -199,20 +199,13 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		return toolErrorTextResponse(req.ID, refusal)
 	}
 
-	// Once a session's whiteboard exists, a successful write by a tool that
-	// dirties one of its panels re-renders its full page (never an embed);
-	// see whiteboardProviders in whiteboard_tools.go.
-	// Registered before the refresh below, so it runs after it: the nudge
-	// follows the rewritten page.
+	// Successful board and panel writes wake the served page.
 	if dashboardNudgingTool(params.Name) {
 		defer func() {
 			if key, _ := params.Arguments["session_key"].(string); key != "" && !responseIsError(resp) {
 				s.dashboardNudge(key)
 			}
 		}()
-	}
-	if whiteboardDirtyingTool(params.Name) || params.Name == whiteboardLoadTool {
-		defer func() { s.refreshWhiteboardAfter(params.Arguments, resp) }()
 	}
 
 	switch params.Name {
@@ -462,10 +455,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		harness = strings.ToLower(strings.TrimSpace(harness))
 		if entry.HarnessApplicable {
 			if harness == "" {
-				harness = s.currentHarness()
-				if isCompactionKey(entry.Key) {
-					harness = s.playbookHarness()
-				}
+				harness = s.playbookHarness()
 			}
 			if harnessEnum := fieldEnum(entry.SelectorFields, "harness"); len(harnessEnum) > 0 {
 				if harness == "" && enumContains(harnessEnum, "default") {
@@ -548,6 +538,9 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 				return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: %w", err))
 			}
 			notifyCompactionTune(entry.Key)
+			if entry.Key == wsconfig.ItemWorkflowLang {
+				s.refreshAgentAmbient()
+			}
 			// The echo reads through the session-anchored resolver so a reset
 			// reports the value that now applies (a committed repo value
 			// included). The reset already happened, so an echo load failure is
@@ -639,6 +632,9 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 				return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: %w", err))
 			}
 			notifyCompactionTune(entry.Key)
+			if entry.Key == wsconfig.ItemWorkflowLang {
+				s.refreshAgentAmbient()
+			}
 			resolvedScope := explicitScope
 			if resolvedScope == "" {
 				resolvedScope = entry.DefaultScope()
@@ -933,7 +929,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			return staticProfileLookup(profiles, err)(name)
 		}
 		force, _ := params.Arguments["force"].(bool)
-		caller := &worktreeReleaseCaller{LeadKey: key, WorkerKey: workerKey, Force: force}
+		caller := &worktreeReleaseCaller{LeadKey: key, WorkerKey: workerKey, Force: force, CheckChildren: s.checkWorktreeBoundChildren}
 		result, err := releaseWorktreeAs(context.Background(), s.gitRunner(), s.environ(), path, poolRV.Value, lookup, caller)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
@@ -1586,11 +1582,29 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
+		key, _ := params.Arguments["session_key"].(string)
+		if err := processGeneratedWrites.grant(key, generated); err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
 		text := ""
 		for _, path := range generated {
 			text += path.Path + "\n"
 		}
 		return toolTextResponse(req.ID, text, nil)
+	case "path.write":
+		if _, err := s.resolveToolRoot(params.Arguments, params.Meta); err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		key, _ := params.Arguments["session_key"].(string)
+		path, pathOK := params.Arguments["path"].(string)
+		content, contentOK := params.Arguments["content"].(string)
+		if !pathOK || !contentOK {
+			return toolTextResponse(req.ID, "", fmt.Errorf("path.write: path and content must be strings"))
+		}
+		if err := processGeneratedWrites.write(key, path, content); err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		return toolTextResponse(req.ID, "wrote "+path+"\n", nil)
 	case "playbook.read":
 		name, _ := params.Arguments["name"].(string)
 		keyStr, _ := params.Arguments["session_key"].(string)

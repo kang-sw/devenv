@@ -41,12 +41,12 @@ function served() {
   return [A, B, X, moreBtn, reply()];
 }
 boot({}, served, options);
-var bar = page.W.toolbar(), pins = page.W.pinList(), moves = 0;
+var bar = page.W.toolbar(), gal = page.W.gallery(), moves = 0;
 function first(what) { check(what, page.board.firstChild === bar, true); }
 function count() { return toolbarCounts(); }
 check("separate count removed", bar.querySelector(".board-count"), null);
 first("toolbar first on a narrow board");
-check("toolbar precedes pins", bar.nextSibling === pins, true);
+check("the gallery stands outside the board", [gal.parentNode === page.dbody, page.board.contains(gal)], [true, false]);
 check("not a card or rail item", [page.W.is(bar), bar.hasAttribute("data-rail"), bar.querySelectorAll(".tpin, .bc-hd").length], [false, false, 0]);
 check("button order and terminal slot", bar.querySelector(".board-tools").children.map(function (n) { return n.className; }), ["board-action board-overview", "board-term-slot", "board-web-slot", "board-action board-download", "board-action board-files", "board-state-filter"]);
 check("overview starts unpressed", bar.querySelector(".board-overview").getAttribute("aria-pressed"), "false");
@@ -58,22 +58,24 @@ page.board.insertBefore = function (n, ref) { if (n === bar) moves++; return ins
 page.board.removeChild = function (n) { if (n === bar) moves++; return remove.call(this, n); };
 clickPin(B); first("pin keeps toolbar first");
 check("a pin is counted once", count(), "open 2 · closed 8");
-options.wide = true; page.W.relayout(); first("width crossing keeps toolbar first");
-check("pins moved to column", pins.parentNode === page.col, true);
+page.width = 1800; page.W.relayout(); first("rail-only width keeps toolbar first");
+check("the gallery stays paged until its column fits", [page.layouts, page.states[page.states.length - 1].narrow], [[], true]);
+page.width = 2560; page.W.relayout(); first("column width crossing keeps toolbar first");
+check("the gallery shows as a column", [page.layouts, gal.parentNode === page.dbody], [[true], true]);
 check("column topics count", count(), "open 2 · closed 8");
 var layoutBefore = page.layouts.slice();
 page.W.overview(true); first("reserved overview placement keeps toolbar first");
-check("overview moves one list immediately after toolbar without layout changes", [bar.nextSibling === pins, pins.parentNode === page.board, page.layouts], [true, true, layoutBefore]);
+check("overview leaves the gallery where it stands, the layout unchanged", [gal.parentNode === page.dbody, page.W.isDocked(B), page.layouts], [true, true, layoutBefore]);
 page.W.relayout();
 var c = page.W.open("k", { name: "C" });
-check("arrange holds overview pins in board", pins.parentNode === page.board, true);
-options.wide = false; page.W.relayout(); options.wide = true; page.W.relayout();
-check("a wide crossing holds the list", [pins.parentNode === page.board, bar.nextSibling === pins], [true, true]);
+check("arrange in overview keeps the docked topic docked", page.W.isDocked(B), true);
+page.width = 1000; page.W.relayout(); page.width = 2560; page.W.relayout();
+check("a wide crossing changes only the layout", [page.W.isDocked(B), page.layouts], [true, [true, false, true]]);
 page.W.overview(false);
-check("exit uses current column layout", pins.parentNode === page.col, true);
+check("exit keeps the current layout", [page.W.isDocked(B), page.layouts], [true, [true, false, true]]);
 c.pin(true); c.pin(false); c.close(); first("card pin/unpin/close keep toolbar first");
 clickPin(B); first("unpin keeps toolbar first");
-check("last unpin returns list after toolbar", bar.nextSibling === pins, true);
+check("the last undock leaves the wide empty slot", [gal.hidden, page.states[page.states.length - 1].empty, page.layouts], [false, true, [true, false, true, false]]);
 var nextMore = more(2); nextMore.setAttribute("data-closed-more", "4");
 B = topic("b", 400); X = topic("x", 0, true);
 swap([B, X, topic("y", 0, true), nextMore, reply()]); first("weave and settle keep toolbar first");
@@ -90,7 +92,7 @@ check("toolbar and overview placement never persist", /toolbar|overview|board-te
 // A real pointer drag: hovering over the toolbar is not a flow drop. A
 // drop below it interpolates only between topics, not the infrastructure.
 boot({}, function () { A = topic("a", 300); B = topic("b", 200); return [A, B]; });
-bar = page.W.toolbar(); pins = page.W.pinList();
+bar = page.W.toolbar();
 function rect(n, top, height) {
   n.getClientRects = function () { return [1]; };
   n.getBoundingClientRect = function () { return { top: top, bottom: top + height, height: height, left: 0, right: 500, width: 500 }; };
@@ -100,16 +102,16 @@ var head = B.querySelector(".tbar"), e = { target: head, isPrimary: true, button
 page.board.fire("pointerdown", e);
 page.doc.listeners.pointermove[0]({ pointerId: 1, pointerType: "mouse", buttons: 1, clientX: 50, clientY: 20, preventDefault: function () {} });
 page.doc.listeners.pointerup[0]({ pointerId: 1, type: "pointerup" });
-check("toolbar rejects drops", names(page.board), ["TOOLBAR", "PINS", "a", "b"]);
+check("toolbar rejects drops", names(page.board), ["TOOLBAR", "a", "b"]);
 page.board.fire("pointerdown", e);
 page.doc.listeners.pointermove[0]({ pointerId: 1, pointerType: "mouse", buttons: 1, clientX: 50, clientY: 50, preventDefault: function () {} });
 page.doc.listeners.pointerup[0]({ pointerId: 1, type: "pointerup" });
-check("toolbar and pin list are never flow peers", names(page.board), ["TOOLBAR", "PINS", "b", "a"]);
+check("the toolbar is never a flow peer", names(page.board), ["TOOLBAR", "b", "a"]);
 var saved = JSON.parse(page.store.cards).topics.filter(function (r) { return r.n === "b"; })[0];
 check("head drop uses real topic time, not toolbar time", saved.a > 300, true);
 
 boot({}, function () { return [mk("div.empty")]; });
-check("empty board keeps toolbar and empty pins before placeholder", names(page.board), ["TOOLBAR", "PINS", "DIV"]);
+check("empty board keeps the toolbar before the placeholder", names(page.board), ["TOOLBAR", "DIV"]);
 check("Files is absent without a pane callback", page.W.toolbar().querySelector(".board-files"), null);
 process.stdout.write(bad.join("\n"));
 `)

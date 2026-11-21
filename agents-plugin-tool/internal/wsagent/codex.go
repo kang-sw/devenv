@@ -13,14 +13,14 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/kang-sw/devenv/internal/wsharnessenv"
 	"github.com/kang-sw/devenv/internal/wsinbox"
 	"github.com/kang-sw/devenv/internal/wslive"
 )
 
 // CodexBackend drives one sustained `codex app-server` process over stdio.
-// A hosted lead runs under a holder, which owns its pipes across daemon
-// replacement, as for agy and Claude; a worker is a daemon-owned process
-// with no holder, as for agy.
+// Hosted leads and workers run under a holder, which owns their pipes
+// across daemon replacement, as for agy and Claude.
 type CodexBackend struct {
 	// Command is the Codex executable; empty looks up "codex" on PATH.
 	Command string
@@ -64,8 +64,8 @@ func codexEnv(spec StartSpec) []string {
 	if spec.MCPSession != nil {
 		set[EnvMCPSessionToken] = spec.MCPSession.Token
 	}
-	drop := append([]string{"CLAUDE", "CODEX_", "PI_", "ORCA_", "WS_PI_"}, leadDropEnv...)
-	return harnessEnv(spec.Env, drop, map[string]bool{"CODEX_HOME": true}, set)
+	drop := []string{"CLAUDE", "CODEX_", "PI_", "ORCA_", "WS_PI_"}
+	return harnessEnv(wsharnessenv.Drop(spec.Env), drop, map[string]bool{"CODEX_HOME": true}, set)
 }
 
 // Start initializes and opens a new process before returning. A holder
@@ -74,9 +74,6 @@ func codexEnv(spec StartSpec) []string {
 func (b CodexBackend) Start(_ context.Context, spec StartSpec) (Process, error) {
 	if spec.Lead != nil && spec.Holder == nil {
 		return nil, errors.New("codex backend: a hosted lead requires a session holder")
-	}
-	if spec.Lead == nil && spec.Holder != nil {
-		return nil, errors.New("codex backend: workers are not holder-held")
 	}
 	attach := spec.Holder != nil && spec.Holder.id != ""
 	if !attach && spec.MCPSession == nil {
@@ -95,6 +92,7 @@ func (b CodexBackend) Start(_ context.Context, spec StartSpec) (Process, error) 
 	cmd.Env = codexEnv(spec)
 	mapper := newCodexMapper(spec.SessionID)
 	mapper.readOnlyWorker = spec.Lead == nil && policy == "never"
+	mapper.worker = spec.Lead == nil
 	if attach {
 		// The holder may have dropped a reply the earlier daemon already
 		// wrote. Read its durable identity once at reattach; steady-state
@@ -119,7 +117,7 @@ func (b CodexBackend) Start(_ context.Context, spec StartSpec) (Process, error) 
 	}
 	holder, pid, _ := stream.HolderInfo()
 	if p.worker && cmd.Process != nil {
-		// A worker has no holder: its MCP hello names the child itself.
+		// A direct worker's MCP hello names the child itself.
 		pid = cmd.Process.Pid
 	}
 	if session := spec.MCPSession; session != nil && session.Started != nil {
@@ -168,7 +166,11 @@ type codexProcess struct {
 }
 
 func (p *codexProcess) processControls() processControls {
-	return processControls{Process: p, approval: p, mode: p, steer: p, commands: p, turns: p}
+	controls := processControls{Process: p, approval: p, mode: p, steer: p, commands: p, turns: p}
+	if p.worker {
+		controls.reports = p
+	}
+	return controls
 }
 
 func (p *codexProcess) call(kind, method string, params map[string]any) (json.RawMessage, error) {
@@ -300,11 +302,14 @@ func codexWorkerMode(level PermissionLevel) (sandbox, policy string, err error) 
 }
 
 // codexStartMode is the sandbox and approval policy a start opens with: a
-// lead's permission mode, a worker's authority. A lead with no mode keeps
-// Codex's own settings.
+// lead's transient common selection or native permission mode, and a worker's
+// authority. A lead with neither keeps Codex's own settings.
 func codexStartMode(spec StartSpec) (sandbox, policy string, err error) {
 	if spec.Lead == nil {
 		return codexWorkerMode(spec.PermissionLevel)
+	}
+	if spec.PermissionLevel != "" {
+		return codexMode(nativePermissionMode(BackendCodex, spec.PermissionLevel))
 	}
 	if spec.Lead.PermissionMode == "" {
 		return "", "", nil
@@ -344,11 +349,21 @@ func (p *codexProcess) Steer(text string) error {
 	if turn == "" {
 		return ErrUnsupported
 	}
-	_, err := p.call("control", "turn/steer", map[string]any{
+	if !p.worker {
+		_, err := p.call("control", "turn/steer", map[string]any{
+			"threadId": session, "expectedTurnId": turn, "input": codexInput(text),
+		})
+		return err
+	}
+	id := "wsc/control/" + p.epoch + "/" + strconv.FormatUint(p.seq.Add(1), 10)
+	return p.writeLine(map[string]any{"id": id, "method": "turn/steer", "params": map[string]any{
 		"threadId": session, "expectedTurnId": turn, "input": codexInput(text),
-	})
-	return err
+	}})
 }
+
+// ClearSteered is a no-op for Codex: turn/steer is scoped by the expected
+// active turn id, so an accepted message cannot leak into a later turn.
+func (p *codexProcess) ClearSteered() error { return nil }
 
 func (p *codexProcess) Interrupt() error {
 	session, turn := p.m.active()

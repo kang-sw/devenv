@@ -72,13 +72,18 @@ func loadGolden(t testing.TB, path string) (goldenDoc, *memSource) {
 	return doc, newMemSource(doc.Genesis, doc.Viewer, evs)
 }
 
-// goldenExcluded lists the expected fields the Go view does not carry, with
-// the reason.
+// goldenExcluded lists fields intentionally outside current reference-engine
+// parity, with the reason.
 var goldenExcluded = map[string]string{
-	"events[].local": "mock bookkeeping (_local): the caller fills unpushed state from the wsledger sync report",
-	"events[].open":  "mock bookkeeping (_open): the open batch is the caller's",
-	"events[].late":  "mock bookkeeping (_late)",
-	"stats.commits":  "a wsledger event carries no commit identity; the caller fills it",
+	"events[].local":     "mock bookkeeping (_local): the caller fills unpushed state from the wsledger sync report",
+	"events[].open":      "mock bookkeeping (_open): the open batch is the caller's",
+	"events[].late":      "mock bookkeeping (_late)",
+	"stats.commits":      "a wsledger event carries no commit identity; the caller fills it",
+	"orgs":               "the reference engine does not yet implement org entities",
+	"items[].ccSources":  "the reference engine does not yet implement org CC provenance",
+	"items[].orgCC":      "the reference engine does not yet implement org CC registrations",
+	"rules[].org":        "the reference engine does not yet implement org assignment rules",
+	"rules[].assignRoot": "the reference engine does not yet project assign-time rule roots",
 }
 
 func TestGoldenParity(t *testing.T) {
@@ -111,6 +116,17 @@ func TestGoldenParity(t *testing.T) {
 			}
 			delete(want["stats"].(map[string]any), "commits")
 			delete(got["stats"].(map[string]any), "commits")
+			delete(got, "orgs")
+			for _, item := range got["items"].(map[string]any) {
+				entry := item.(map[string]any)
+				delete(entry, "ccSources")
+				delete(entry, "orgCC")
+			}
+			for _, rule := range got["rules"].(map[string]any) {
+				entry := rule.(map[string]any)
+				delete(entry, "org")
+				delete(entry, "assignRoot")
+			}
 			var diffs []string
 			diffJSON("", want, got, &diffs)
 			if len(diffs) > 0 {

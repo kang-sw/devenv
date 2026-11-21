@@ -50,8 +50,8 @@ func checkHostedFiles(t *testing.T, root string, source fs.FS) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if count != 5 {
-		t.Fatalf("stage has %d files, want exactly 5", count)
+	if count != 6 {
+		t.Fatalf("stage has %d files, want exactly 6", count)
 	}
 }
 

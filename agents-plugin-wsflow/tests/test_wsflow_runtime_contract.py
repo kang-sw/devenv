@@ -47,14 +47,14 @@ class WsflowRuntimeContractTest(unittest.TestCase):
                 "WS_MCP_NO_AGENT": "1",
                 "WS_MCP_NAMESPACE": "wsflow",
                 "WS_MCP_SETUP_TOOL": "setup",
-                "WS_MCP_CONFIG_MANIFESTS": "./config-manifest.json;./dashboard-config-manifest.json",
+                "WS_MCP_CONFIG_MANIFESTS": "./config-manifest.json;./agy-config-manifest.json;./dashboard-config-manifest.json",
             },
         )
 
     def test_config_manifest_env_resolves_in_both_launch_configs(self):
         # .mcp.json resolves against cwd "." (the plugin root); the Claude
         # manifest names each path under ${CLAUDE_PLUGIN_ROOT}. Both list the
-        # package manifest and the dashboard manifest joined by ";" (the one
+        # package, agy, and dashboard manifests joined by ";" (the one
         # separator valid on every platform). A path that does not resolve
         # fails nothing at runtime, so pin that every listed path is a file.
         codex = json.loads((PLUGIN_DIR / ".mcp.json").read_text(encoding="utf-8"))
@@ -63,15 +63,10 @@ class WsflowRuntimeContractTest(unittest.TestCase):
             (codex["mcpServers"]["wsflow"]["env"]["WS_MCP_CONFIG_MANIFESTS"], "./"),
             (claude["mcpServers"]["wsflow"]["env"]["WS_MCP_CONFIG_MANIFESTS"], "${CLAUDE_PLUGIN_ROOT}/"),
         ):
-            paths = value.split(";")
-            self.assertEqual(
-                [p[len(prefix):] for p in paths],
-                ["config-manifest.json", "dashboard-config-manifest.json"],
-                value,
-            )
-            for path in paths:
-                self.assertTrue(path.startswith(prefix), value)
-                self.assertTrue((PLUGIN_DIR / path[len(prefix):]).is_file(), path)
+            names = ["config-manifest.json", "agy-config-manifest.json", "dashboard-config-manifest.json"]
+            self.assertEqual(value.split(";"), [prefix + name for name in names])
+            for name in names:
+                self.assertTrue((PLUGIN_DIR / name).is_file(), name)
 
     def test_runtime_contract_matches_agentless_capabilities(self):
         contract = self.load_contract()

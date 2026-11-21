@@ -25,3 +25,20 @@ func TestInlineCapsulesBrowserWrapping(t *testing.T) {
 		t.Fatalf("inline capsule wrapping: %v", err)
 	}
 }
+
+func TestComposerInlineBrowser(t *testing.T) {
+	if os.Getenv("WS_PLAYWRIGHT_MODULE") == "" {
+		t.Skip("set WS_PLAYWRIGHT_MODULE to run isolated Chromium composer regression")
+	}
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, node, "testdata/composer-inline.browser.cjs").CombinedOutput()
+	t.Log(string(out))
+	if err != nil {
+		t.Fatalf("inline composer browser: %v", err)
+	}
+}

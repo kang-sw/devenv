@@ -79,7 +79,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "agenda.set",
-			"description": "Upsert a session-level agenda blob under a key. Agenda blobs hold mode context ('what are we doing and why') and are reminded at workflow-manual load. Session-scoped: clear a blob when its work ends; a fact a future session needs belongs in note.write. Freeform fallback for cases not covered by a typed enter.* tool. Pass merge: true to patch the stored blob (RFC 7396 JSON Merge Patch) instead of replacing it, so a small change does not re-send the whole blob.",
+			"description": "Upsert a session agenda blob under a key. Agenda is this session's working memory: what is being done, why, the next step, and pending questions. It is restored with the session key after compaction or resume via workflow_state; clear a blob when its work ends. Use todo for an ordered checklist of steps; keep context, rationale, and pending state in agenda. A fact a future session needs belongs in note.write. Pass merge: true to patch the stored blob (RFC 7396 JSON Merge Patch) instead of replacing it, so a small change does not re-send the whole blob.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -117,7 +117,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "git.resolve_impl_branch",
-			"description": "Resolve a ticket's canonical implementation branch before worktree provisioning. Pure name resolution: base is the exact run base/current branch (including goal/* or impl/*); no branch is created. Uses the same merge-root and ticket identity authority as route.resolve_implement.",
+			"description": "Resolve a ticket's canonical implementation branch before worktree provisioning. Pure name resolution: base is the exact run base/current branch (including goal/* or impl/*); no branch is created, and it does not inspect whether the branch exists or has landed (worktree.acquire and route.resolve_implement decide recreate-or-block). Uses the same merge-root and ticket identity authority as route.resolve_implement.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -150,7 +150,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "todo.add",
-			"description": "Add a new pending todo item with a caller-provided key (unique within the active list) and title. position defaults to \"end\" (append); \"before\"/\"after\" insert relative to ref_key, which is required for those positions and rejected for \"end\". Erased keys are reusable.",
+			"description": "Add a pending step to the session's ordered todo checklist with a caller-provided key (unique within the active list) and title. position defaults to \"end\" (append); \"before\"/\"after\" insert relative to ref_key, which is required for those positions and rejected for \"end\". Erased keys are reusable.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -166,7 +166,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "todo.check",
-			"description": "Set the status of an existing todo item. Status is one of pending, wip, done, defer. Successful raw/text output includes a full ordered checkpoint todo rendering with instructions only for adjacent actionable items; compact rows with hidden instructions get an indented ...+ marker.",
+			"description": "Mark a step on the session's ordered todo checklist as pending, wip, done, or defer. Session context and rationale belong in agenda.set, not todo. Successful raw/text output includes a full ordered checkpoint todo rendering with instructions only for adjacent actionable items; compact rows with hidden instructions get an indented ...+ marker.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -179,7 +179,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "todo.erase",
-			"description": "Remove a todo item by key. The key becomes reusable afterwards.",
+			"description": "Remove a step from the session's todo checklist by key. The key becomes reusable afterwards.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -191,7 +191,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "todo.clear",
-			"description": "Remove all todo items, or only done items when done_only is true (leaving pending, wip, defer).",
+			"description": "Remove all steps from the session's todo checklist, or only done steps when done_only is true (leaving pending, wip, defer).",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -203,7 +203,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "todo.list",
-			"description": "Render the todo list with visible {key} tokens. Summary mode (default) shows all pending/wip items plus one adjacent context item on each side of each active block, collapsing the rest to '...'. Full mode shows every item in order.",
+			"description": "Show the session's ordered checklist of steps with visible {key} tokens. Session context and rationale belong in agenda.set, not todo. Summary mode (default) shows all pending/wip items plus one adjacent context item on each side of each active block, collapsing the rest to '...'. Full mode shows every item in order.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -215,7 +215,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "todo.read",
-			"description": "Return one todo item's full JSON payload, including nullable instruction.",
+			"description": "Return one step from the session's todo checklist as a full JSON payload, including nullable instruction.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -227,7 +227,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "todo.reorder",
-			"description": "Move the contiguous span [from_key … to_key] as a block to before or after ref_key. ref_key must lie outside the span.",
+			"description": "Reorder steps in the session's todo checklist: move the contiguous span [from_key … to_key] as a block to before or after ref_key. ref_key must lie outside the span.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -324,7 +324,7 @@ func tools() []map[string]any {
 					"key":         stringProperty("Knob key, e.g. workflow.prefer_subagent, agents.tier, prompt.<pointId>, worktree.profile.<name>."),
 					"value":       stringOrObjectProperty("New value (see the description)."),
 					"scope":       enumStringProperty("Storage scope; defaults to the key's declared scope.", wsconfig.ScopeSchemaEnum()),
-					"harness":     stringProperty("For keys that vary by harness: claude, codex, pi, or *. Defaults to this session's harness."),
+					"harness":     stringProperty("For keys that vary by harness: claude, codex, pi, agy, or *. Defaults to this session's harness."),
 					"reset":       boolProperty("Drop the override back to the default; agents.tier also takes value {tier}, other keys no value."),
 					"session_key": stringProperty("Your ws session key; required for lead-authority and prompt.* keys and for scope session."),
 				},
@@ -512,13 +512,13 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "worktree.release",
-			"description": "Lead-only. Return a worktree to the pool by path or worker key: run pre_release hooks, reset --hard and clean -ffdx (discarding uncommitted and unpreserved ignored files), detach HEAD, record preserved size and remove its lease. Hook failure leaves it leased. Does not delete the worktree or retire the key. Refuses another holder's lease or a dirty unleased worktree unless forced. Text by default; format=json for structured output.",
+			"description": "Lead-only. Return a worktree to the pool by path or worker key: run pre_release hooks, reset --hard and clean -ffdx (discarding uncommitted and unpreserved ignored files), detach HEAD, record preserved size and remove its lease. Hook failure leaves it leased. Does not delete the worktree or retire the key. Refuses another holder's lease, a dirty unleased worktree, or a worktree with non-closed bound child agents unless forced. Text by default; format=json for structured output.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"path":   stringProperty("Absolute worktree path to release. Provide path or key."),
 					"key":    stringProperty("A worker session key bound to the worktree to release. Provide path or key."),
-					"force":  boolProperty("Release another holder's lease or a dirty unleased worktree. Confirm the owner is gone or agreed first; uncommitted work is discarded."),
+					"force":  boolProperty("Release another holder's lease, a dirty unleased worktree, or a worktree with non-closed bound child agents. Confirm the owner and bound children are gone or agreed first; uncommitted work is discarded."),
 					"format": stringProperty(formatPropertyDescription),
 				},
 			},
@@ -1129,6 +1129,18 @@ func tools() []map[string]any {
 			},
 		},
 		{
+			"name":        "path.write",
+			"description": "Write a workflow artifact only when this session key previously minted that exact cache path through path.generate. Repository paths, another session's paths, and generated plan or clone paths are refused.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"path":    stringProperty("Exact absolute cache-artifact path returned by this session's path.generate call."),
+					"content": stringProperty("Complete artifact content to write."),
+				},
+				"required": []string{"path", "content"},
+			},
+		},
+		{
 			"name":        "workflow_manual",
 			"description": "Render and restore the ws workflow primitives manual and session state for a lead session_key. An unresolvable key returns a fail-loud notice and never mints a new key. Lead-only.",
 			"inputSchema": map[string]any{
@@ -1219,7 +1231,7 @@ func toolSchemaRequiresSessionKey(name string) bool {
 		"review.marker", "review.stamp",
 		"worktree.acquire", "worktree.release", "worktree.remove", "worktree.list",
 		"tickets.query", "tickets.close", "tickets.move", "tickets.create_empty", "tickets.sage_gate", "tickets.sage_stamp", "tickets.verify",
-		"tickets.acquire", "tickets.release", "tickets.index_init", "path.generate", "playbook.render":
+		"tickets.acquire", "tickets.release", "tickets.index_init", "path.generate", "path.write", "playbook.render":
 		return true
 	default:
 		if entry, ok := configKeyEntryForTool(name); ok {

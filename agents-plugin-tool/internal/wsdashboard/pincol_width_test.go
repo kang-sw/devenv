@@ -1,6 +1,8 @@
 package wsdashboard
 
 import (
+	"encoding/json"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -27,14 +29,13 @@ func TestPinnedColumnFillsTheWindowRightOfTheBoard(t *testing.T) {
   .dash:not(.index) { --tkmaxw: none; }
   .dr-clip { left: auto; width: min(1280px, calc(100% - 2 * var(--dpad))); }
 }`,
-		"@media (min-width: 1600px) { .dgrid.board { margin: 0; } }",
 		".dash { --tkml: 0px; }",
 		".dash.index { --tkmaxw: 1080px; --tkml: auto; }",
 		":root { --pbw: calc(1680px - 32px - 356px); }",
+		".dash { --stagew: var(--pbw); }",
 		".dash.board { --pbw: 900px; }",
-		":root[data-pincol] .dbody { grid-template-columns: minmax(0, min(var(--boardw, min(var(--pbw), 100% - 496px)), 100% - 296px)) minmax(280px, 1fr); }",
-		":root[data-pincol] .dbody { grid-template-columns: 340px minmax(0, min(var(--boardw, min(var(--pbw), 100% - 852px)), 100% - 652px)) minmax(280px, 1fr); }",
-		":root[data-pincol] .dwrap:not(.narrow), :root[data-pincol] .dgrid.board { max-width: none; }",
+		`:root:is([data-gal="col"], [data-gal="empty"], [data-gal="drag"]) .dbody { grid-template-columns: 340px minmax(0, min(var(--boardw, min(var(--pbw), 100% - 852px)), 100% - 652px)) minmax(280px, 1fr); }`,
+		`:root:is([data-gal="col"], [data-gal="empty"], [data-gal="drag"]) .dwrap:not(.narrow),`,
 	} {
 		if !strings.Contains(css, want) {
 			t.Errorf("dashboard.css lacks %q", want)
@@ -45,70 +46,139 @@ func TestPinnedColumnFillsTheWindowRightOfTheBoard(t *testing.T) {
 	}
 }
 
-// TestEdgePinZoneFitsTheStripRightOfThePage pins the first-pin edge zone's
-// width: it fills the strip right of the left-aligned 1680px page, at least
-// 48px, so it leaves the board column to its own reorder drops; below
-// 1780px, where that strip is narrow, its label runs vertically. From
-// 1780px it stands there idle as the empty column's placeholder while
-// nothing is pinned, the layout is not "tabs", and no store page shows
-// (from 2200px the column itself shows instead: data-pincol hides it).
-func TestEdgePinZoneFitsTheStripRightOfThePage(t *testing.T) {
+// TestGalleryNoReservedColumnWithoutAPage pins the 4-band docking gallery CSS:
+// Bands 1-3 (< 1600px, tabs, or >= 1600px without enough spare width for the
+// 4th column) keep the gallery fused over #bcol (data-gal="narrow") while the
+// rail stays permanently docked from 1600px; Band 4 activates the 3rd grid track
+// (rail + stage + gallery column) with data-gal="empty", "drag", or "col",
+// gating .bp-edge on [data-pincol].
+func TestGalleryNoReservedColumnWithoutAPage(t *testing.T) {
 	css := mustAsset(t, "dashboard.css")
-	zone := ""
-	for _, line := range strings.Split(css, "\n") {
-		if strings.HasPrefix(line, ".bpzone {") {
-			zone = line
+	for _, gone := range []string{".bpzone", ".bpins", ".bpcol", "data-drop", "attr(data-label)"} {
+		if strings.Contains(css, gone) {
+			t.Errorf("dashboard.css still carries the pin stack's %q", gone)
 		}
 	}
-	if want := "width: max(48px, calc(100vw - 1696px));"; !strings.Contains(zone, want) {
-		t.Errorf("the .bpzone rule lacks %q: %q", want, zone)
-	}
 	for _, want := range []string{
-		"@media (max-width: 1779.98px) { .bpzone { writing-mode: vertical-rl; padding: 12px 4px; } }",
-		`@media (min-width: 1780px) {
-  :root:not([data-pincol]):not([data-bdrag]) body:not(.tk-paged):not([data-dashboard-layout="tabs"]) .bpzone { display: grid;`,
+		".bgal { display: none; }",
+		":root[data-gal] .bgal:not([hidden]) { display: flex; gap: 6px; min-width: 0; min-height: 0; }",
+		".bgal > .bp-edge { display: none; }",
+		`:root[data-gal="narrow"] .bgal:not([hidden]) { position: fixed; z-index: 35; left: var(--gal-left, 0px); top: var(--gal-top, 0px); width: var(--gal-width, 100vw); height: var(--gal-height, 100vh); pointer-events: none; }`,
+		`  :root[data-pincol] .bgal > .bp-edge { display: block; }`,
+		`  :root:is([data-gal="col"], [data-gal="empty"], [data-gal="drag"]) .bgal:not([hidden]) { position: relative; z-index: auto; top: auto; bottom: auto; right: auto; width: auto; grid-column: 3; grid-row: 1; }`,
+		`  :root:is([data-gal="col"], [data-gal="empty"], [data-gal="drag"]) .dash:not(.live):not(.history) .bgal:not([hidden]) { position: sticky; top: 12px; height: calc(100vh - 24px); height: calc(100dvh - 24px); }`,
+		// Inactive pages leave the clipped viewport by transform alone, a gap
+		// past its edge (an edge-adjacent box still counts as intersecting).
+		".gal-viewport { flex: 1 1 0; min-width: 0; min-height: 0; position: relative; overflow: hidden; overflow: clip; }",
+		".gal-page { position: absolute; inset: 0; display: flex; min-width: 0; min-height: 0; transform: translateY(calc(var(--gal-off, 0) * (100% + 24px))); }",
 	} {
 		if !strings.Contains(css, want) {
 			t.Errorf("dashboard.css lacks %q", want)
 		}
 	}
+	at := strings.Index(css, "/* ===== paged docking gallery")
+	end := strings.Index(css, ".rail .rhd {")
+	if at < 0 || end < at {
+		t.Fatal("dashboard.css lacks the gallery block")
+	}
+	// No rule whose subject is the gallery, a page, a split or a pane hides
+	// it by display, visibility, opacity or content-visibility (the empty
+	// gallery's own display: none applies only with nothing docked, where
+	// the page sets no data-gal).
+	block := regexp.MustCompile(`(?s)/\*.*?\*/`).ReplaceAllString(css[at:end], "")
+	for _, m := range regexp.MustCompile(`([^{}]+)\{([^{}]*)\}`).FindAllStringSubmatch(block, -1) {
+		sel, decls := strings.TrimSpace(m[1]), m[2]
+		if sel == ".bgal" {
+			continue
+		}
+		for _, one := range strings.Split(sel, ",") {
+			parts := strings.Fields(one)
+			subject := parts[len(parts)-1]
+			if !regexp.MustCompile(`^(\.bgal|\.gal-(page|viewport|split|pane))\b`).MatchString(subject) {
+				continue
+			}
+			for _, banned := range []string{"content-visibility", "visibility: hidden", "opacity: 0", "display: none"} {
+				if strings.Contains(decls, banned) {
+					t.Errorf("a gallery rule hides with %q: %s", banned, sel)
+				}
+			}
+		}
+	}
 }
 
-// TestPinnedColumnSlotFromTheRailDockedWidth pins the four-panel width:
-// from 2200px, where the rail stays docked beside the pinned column, the
-// page shows the column with nothing pinned too (dashboard.js
-// pinColumnFits, asked again when the window crosses 2200px), so the
-// column's board-width handle works before the first pin, and the column's
-// empty pin list is the idle pin zone's quiet "drop here" placeholder, lit
-// while a drag runs; below 2200px the column still waits for a pin.
-func TestPinnedColumnSlotFromTheRailDockedWidth(t *testing.T) {
+// TestGalleryLayoutModes runs the dynamic 4-band layout mapping (cards.js
+// canFitFourCol + dashboard.js galMode + layout hook over WsGallery.layout)
+// under node: Bands 1-3 keep narrow/fused gallery (no overlay rail from
+// 1600px); Band 4 opens the 4th column iff !tabs && vw >= 1600 &&
+// spareRight >= boardW (e.g. >= 2441px on default 5:7 live pages, >= 2204px
+// on 900px board-first pages).
+func TestGalleryLayoutModes(t *testing.T) {
 	js := mustAsset(t, "dashboard.js")
+	cardsJS := mustAsset(t, "cards.js")
+	mode := regexp.MustCompile(`(?s)\n  function galMode\(\) \{.*?\n  \}\n`).FindString(js)
+	hook := regexp.MustCompile(`(?s)\n      layout: function \(s\) \{.*?\n      \},\n`).FindString(js)
+	canFit := regexp.MustCompile(`(?s)\n  function canFitFourCol\(vw, tabs\) \{.*?\n  \}\n`).FindString(cardsJS)
+	if mode == "" || hook == "" || canFit == "" {
+		t.Fatal("dashboard.js/cards.js holds no galMode / layout / canFitFourCol")
+	}
 	for _, want := range []string{
-		`var PIN_SLOT = window.matchMedia ? window.matchMedia("(min-width: 2200px)") : null;`,
-		`return (n > 0 || !!(PIN_SLOT && PIN_SLOT.matches)) && !!(PIN_WIDE && PIN_WIDE.matches) && !(live && (grid.getAttribute("data-layout") || load(LAYOUT_KEY)) === "tabs");`,
-		`[PIN_WIDE, PIN_SLOT].forEach(function (m) { if (m && m.addEventListener) m.addEventListener("change", function () { window.WsCards.relayout(); }); });`,
+		`if (PIN_WIDE && PIN_WIDE.addEventListener) PIN_WIDE.addEventListener("change", function () { window.WsCards.relayout(); });`,
+		"host: dbody || doc.body, mode: galMode,",
 	} {
 		if !strings.Contains(js, want) {
 			t.Errorf("dashboard.js lacks %q", want)
 		}
 	}
-	css := mustAsset(t, "dashboard.css")
-	head := "@media (min-width: 2200px) {\n  /* rail and column both show */"
-	at := strings.Index(css, head)
-	if at < 0 {
-		t.Fatalf("dashboard.css lacks %q", head)
-	}
-	block := css[at:]
-	block = block[:strings.Index(block, "\n}")]
-	for _, want := range []string{
-		`  :root[data-pincol] body:not(.tk-paged) .bpcol > .bpins:empty { display: grid; place-items: center; padding: 12px; border: 2px dashed color-mix(in srgb, var(--wb-muted-fg) 40%, transparent);`,
-		`  :root[data-pincol] .bpcol > .bpins:empty::before { content: attr(data-drop); }`,
-		`  :root[data-pincol][data-bdrag] body:not(.tk-paged) .bpcol > .bpins:empty { border-color: var(--wb-primary);`,
-	} {
-		if !strings.Contains(block, want) {
-			t.Errorf("the 2200px block lacks %q", want)
-		}
-	}
+	gallery, _ := json.Marshal(mustAsset(t, "gallery.js"))
+	hook = strings.TrimSuffix(strings.TrimSpace(hook), ",")
+	runNode(t, "gallery layout modes", "var GALLERY = "+string(gallery)+";\n"+`
+var bad = [];
+function check(what, got, want) { if (JSON.stringify(got) !== JSON.stringify(want)) bad.push(what + ": got " + JSON.stringify(got) + ", want " + JSON.stringify(want)); }
+var w = {}; new Function("window", "module", GALLERY)(w, undefined); var G = w.WsGallery;
+var attrs = {}, rails = 0, placed = 0, width = 0, layoutKey = "auto";
+var root = { hasAttribute: function (k) { return k in attrs; }, setAttribute: function (k, v) { attrs[k] = v; }, removeAttribute: function (k) { delete attrs[k]; } };
+var grid = { getAttribute: function () { return layoutKey; } }, live = true, LAYOUT_KEY = "layout";
+var CONVW_MIN = 320, SPLITB_MIN = 360, boardw = 0, convow = 0, board = null, opt = { split: {} };
+function load() { return layoutKey; }
+var galNarrow = false;
+var window = { get innerWidth() { return width; } };
+function railOpen() { rails++; }
+function placeGallery() { placed++; }
+` + canFit + mode + `
+var optLayout = { ` + hook + ` };
+function at(px, pages, dragging, tabs) {
+  width = px; layoutKey = tabs ? "tabs" : "auto";
+  var m = galMode(), s = G.layout({ width: m.width, tabs: m.tabs, fourCol: canFitFourCol(m.width, m.tabs), pages: pages, dragging: dragging });
+  s.pages = pages; s.dragging = dragging;
+  optLayout.layout(s);
+  return [attrs["data-gal"] || null, "data-pincol" in attrs, s.overlay];
+}
+check("Band 1 1599px, no page: no gallery", at(1599, 0, false), [null, false, false]);
+check("Band 1 1599px, a page: the narrow view", at(1599, 1, false), ["narrow", false, false]);
+check("Band 1 1599px, a drag with no page: the narrow rail", at(1599, 0, true), ["narrow", false, false]);
+check("Band 2 1640px, a page: fused narrow, no overlay rail", at(1640, 1, false), ["narrow", false, false]);
+check("Band 3 1920px, a page: fused narrow, no overlay rail", at(1920, 1, false), ["narrow", false, false]);
+check("Band 3 2440px live default, a page: still Band 3 (744 < 744.33)", at(2440, 1, false), ["narrow", false, false]);
+check("Band 4 2441px live default, no page: idle empty slot in Col 3", at(2441, 0, false), ["empty", false, false]);
+check("Band 4 2560px live default, a page: 4-col gallery with rail docked", at(2560, 1, false), ["col", true, false]);
+check("Band 4 2560px, a drag with no page: drag slot in Col 3, no pincol", at(2560, 0, true), ["drag", false, false]);
+opt.split = null;
+check("Band 3 2203px board-first, no page: still fused narrow", at(2203, 0, false), [null, false, false]);
+check("Band 4 2204px board-first, no page: idle empty slot in Col 3", at(2204, 0, false), ["empty", false, false]);
+board = { closest: function (selector) { return selector === ".dgrid.worktree" ? {} : null; } };
+check("worktree 2204px keeps gallery fused while its 744px board would not fit", at(2204, 1, false), ["narrow", false, false]);
+check("worktree 2441px fits the board beside its gallery", at(2441, 1, false), ["col", true, false]);
+board = null;
+opt.split = {};
+check("tabs at 2560px, a page: the narrow view", at(2560, 1, false, true), ["narrow", false, false]);
+rails = 0; at(1920, 1, false); at(2560, 1, false); at(1920, 1, false);
+check("each pincol transition closes the session rail overlay once", rails, 2);
+placed = 0; at(1920, 1, false);
+check("Band 3 places the gallery over the board column", [placed, galNarrow], [1, true]);
+at(2560, 1, false);
+check("Band 4 stops placing the narrow overlay", galNarrow, false);
+process.stdout.write(bad.join("\n"));
+`)
 }
 
 // TestConversationSplitHandle pins the live grid's conversation/board
@@ -153,10 +223,9 @@ func TestConversationSplitHandle(t *testing.T) {
 func TestLiveCellIsTheConversationAndTheBoard(t *testing.T) {
 	css := mustAsset(t, "dashboard.css")
 	for _, want := range []string{
-		".dbody:has(> .dgrid.live) { --cvw: var(--convow, calc(var(--boardw) * 5 / 7)); }",
-		`  :root[data-pincol][data-boardw] .dbody:has(> .dgrid.live) { grid-template-columns: minmax(0, min(var(--cvw) + 16px + var(--boardw), 100% - 296px)) minmax(280px, 1fr); }`,
-		`  :root[data-pincol][data-boardw] .dbody:has(> .dgrid.live) { grid-template-columns: 340px minmax(0, min(var(--cvw) + 16px + var(--boardw), 100% - 652px)) minmax(280px, 1fr); }`,
-		":root[data-pincol][data-boardw] .dgrid.live { --dgrid-cols: minmax(320px, min(var(--cvw), 100% - 360px - var(--dgrid-gap))) minmax(0, 1fr); }",
+		".dash:has(> .dwrap .dgrid:is(.live, .history)) { --cvw: var(--convow, calc(var(--boardw) * 5 / 7)); }",
+		`  :root[data-pincol][data-boardw]:is([data-gal="col"], [data-gal="empty"], [data-gal="drag"]) .dbody:has(> .dgrid:is(.live, .history)) { grid-template-columns: 340px minmax(0, min(var(--cvw) + 16px + var(--boardw), 100% - 652px)) minmax(280px, 1fr); }`,
+		":root[data-boardw] .dgrid:is(.live, .history) { --dgrid-cols: minmax(320px, min(var(--cvw), 100% - 360px - var(--dgrid-gap))) minmax(0, 1fr); }",
 		".dgrid { --dgrid-cols: minmax(320px, 5fr) minmax(0, 7fr); --dgrid-gap: 16px; }",
 	} {
 		if !strings.Contains(css, want) {

@@ -1,5 +1,5 @@
 ---
-title: Guard mixed-version ws deployments (skew notice, tool-surface monotonicity, newer-schema write refusal, tool-list refresh)
+title: "혼합 버전 ws 배포 보호 장치 (버전 차이 안내, 도구 표면 단조성, 상위 스키마 쓰기 거부, 도구 목록 갱신)"
 related:
   261018-research-claude-mod-ws-mcp-reconnect: the Claude mod reconnect watchdog this ticket widens to daemon replacement
   261112-bug-ws-launcher-fingerprint-skips-embedded-assets: same discussion; dev-only stale binary (scenario 6), not in scope here

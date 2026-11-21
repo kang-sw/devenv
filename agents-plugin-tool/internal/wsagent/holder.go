@@ -70,6 +70,7 @@ func (h ManagerHost) Status(id string) (wsholder.AttachInfo, error) {
 // descriptor.
 const holderKindLead = "lead"
 const holderKindPiWorker = "pi-worker"
+const holderKindAgentWorker = "agent-worker"
 
 // leadRingBytes is the output ring of a lead conversation's holder. A
 // rejoin rebuilds the turn state from the ring, so it holds a long turn's
@@ -81,6 +82,7 @@ const leadRingBytes = 32 << 20
 // holderSession is the descriptor a lead conversation's holder records.
 type holderSession struct {
 	Kind    string `json:"kind"`
+	Backend string `json:"backend,omitempty"`
 	ReplyID string `json:"reply_id"`
 	Cwd     string `json:"cwd,omitempty"`
 	Label   string `json:"label,omitempty"`
@@ -90,8 +92,9 @@ type holderSession struct {
 
 // holderTable routes the holders' events to the processes they belong to.
 type holderTable struct {
-	mu    sync.Mutex
-	procs map[string]*holderChild
+	mu       sync.Mutex
+	procs    map[string]*holderChild
+	rejected map[string]bool
 }
 
 func (t *holderTable) add(id string, h *holderChild) {
@@ -139,6 +142,15 @@ type holderChild struct {
 	// ringSkip is the launch's wsholder.LaunchSpec.RingSkip: output lines
 	// the backend's mapper drops, kept out of the ring.
 	ringSkip string
+	// ringPulse is the launch's wsholder.LaunchSpec.RingPulse: a content-free
+	// replacement emitted at a bounded rate for skipped output.
+	ringPulse string
+
+	// Worker replay waits for record/descriptor ownership validation. The
+	// holder's replay reply precedes its events, so Scan can finish while
+	// the event reader waits here with bounded socket backpressure.
+	attachReady chan struct{}
+	attachOnce  sync.Once
 
 	proc *streamProcess
 	base string
@@ -173,7 +185,7 @@ func (h *holderChild) start(p *streamProcess, cmd *exec.Cmd) error {
 	if err != nil {
 		return err
 	}
-	id, err := h.host.LaunchWith(wsholder.LaunchSpec{Session: raw, RingBytes: leadRingBytes, RingSkip: h.ringSkip})
+	id, err := h.host.LaunchWith(wsholder.LaunchSpec{Session: raw, RingBytes: leadRingBytes, RingSkip: h.ringSkip, RingPulse: h.ringPulse})
 	if err != nil {
 		return fmt.Errorf("start a session holder: %w", err)
 	}
@@ -227,6 +239,13 @@ func (h *holderChild) release() { h.table.remove(h.id, h) }
 
 // event takes one holder event, on the holder's reader goroutine.
 func (h *holderChild) event(ev wsholder.Event) {
+	if h.attachReady != nil {
+		select {
+		case <-h.attachReady:
+		case <-h.proc.closing:
+			return
+		}
+	}
 	switch ev.Event {
 	case "output":
 		h.seen(ev.Seq)
@@ -339,4 +358,29 @@ type holderProcess interface {
 	ReplayUntil(first, target uint64)
 	StopError() error
 	Detach() bool
+}
+
+// reject fences the orphan sweep even when a heartbeat validated the worker
+// before holdersScanned visited it. A mismatched record grants no stop authority.
+func (t *holderTable) reject(id string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.rejected == nil {
+		t.rejected = map[string]bool{}
+	}
+	t.rejected[id] = true
+}
+
+func (t *holderTable) isRejected(id string) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.rejected[id]
+}
+
+// allowHolderReplay opens a worker's transport only after the runner checked
+// its ownership and reconciled downgrade state. Leads have no worker gate.
+func (p *streamProcess) allowHolderReplay() {
+	if h := p.holder; h != nil && h.attachReady != nil {
+		h.attachOnce.Do(func() { close(h.attachReady) })
+	}
 }

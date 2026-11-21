@@ -1,5 +1,5 @@
 ---
-title: "Daemon version arbitration: starter pre-check plus a daemon self-contest after start"
+title: "데몬 버전 중재: 시작기 사전 점검 및 기동 후 데몬 자체 경합"
 related:
   261115-feat-werkschaft-electron-daemon-override: "Werkschaft start/replace paths; its 2026-11-18 Decisions entry records (1343)=a, the 09:27 cross-minor replace and (1346)=b that this ticket stays consistent with"
   261114-bug-ws-shared-daemon-restarts-without-a-swap: "ordinary connection never swaps an equal core; dev.py owns the explicit build and swap"

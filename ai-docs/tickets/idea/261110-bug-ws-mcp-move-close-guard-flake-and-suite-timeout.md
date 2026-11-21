@@ -1,5 +1,5 @@
 ---
-title: "internal/mcp: TestMoveCloseGuard fails under full-suite load, and the suite overruns go test's default 10m timeout"
+title: "internal/mcp: 전체 스위트 부하 시 TestMoveCloseGuard 실패 및 go test 기본 10분 타임아웃 초과"
 ---
 
 # TestMoveCloseGuard flake and internal/mcp suite timeout

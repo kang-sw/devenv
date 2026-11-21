@@ -83,8 +83,9 @@ func dashboardCommand(args []string) {
 	// makes no store call, so it never takes the ring.
 	wsmailbox.EnablePersistent()
 	// StartDaemon starts the runner before it returns the daemon, so the
-	// runner's tracker-changed callback is bound once the daemon exists.
+	// runner's daemon callbacks are bound once the daemon exists.
 	var trackerChanged lateFunc
+	var agyActivity lateFunc
 	// Bound once the mailbox sweep runs; Close calls it before releasing
 	// the dashboard lock.
 	var exportMailbox lateFunc
@@ -98,7 +99,7 @@ func dashboardCommand(args []string) {
 		Log:    logw,
 		OnExit: persistHolderExit(dir),
 	})
-	agents := newAgentRunner(dir, logw, trackerChanged.call, holders)
+	agents := newAgentRunner(dir, logw, trackerChanged.call, agyActivity.call, holders)
 	nudges := mcp.NewWhiteboardNudges(dir, agents, logw)
 	host := &proxyHost{notes: sessions.Notes, dir: dir, port: *port, lan: *lan, buildTime: *buildTime, contentHash: contentHash, logw: logw, configPath: filepath.Clean(configPath), agents: agents, nudges: nudges}
 	// A store's support conversation runs in the store's clone, so an
@@ -126,6 +127,7 @@ func dashboardCommand(args []string) {
 		Sessions:       sessions,
 		Worktrees:      sessions,
 		MailWake:       wswake.Mailbox,
+		AgyCommand:     wsagent.AgyBackend{}.ResolveCommand,
 		Agents:         agents,
 		LeadNudges:     nudges,
 		Tracker:        &dashboardTracker{h: tracker, err: trackerErr, unregistered: func() { support.CloseUnregistered() }},
@@ -165,6 +167,7 @@ func dashboardCommand(args []string) {
 		wsdashboard.PruneStagedExecutables(dir, exe)
 	}
 	trackerChanged.set(daemon.TrackerChanged)
+	agyActivity.set(daemon.AgyActivity)
 	host.live.Store(daemon)
 	// The hooks read the stores on every change signal the page gets from
 	// the watch and the poll; the watch also sees the daemon's own writes.
@@ -289,8 +292,14 @@ func trackerStoreRoot(h *wstrackerhost.Host, newErr error) func(id string) (stri
 // newAgentRunner is the daemon's agent runner: the claude and pi backends,
 // ws-mcp's key store for conversation keys, and the plugin's Python launcher
 // for the ws-mcp it attaches to a conversation whose profile allows ws tools.
-// trackerChanged runs after a conversation's successful tracker write.
-func newAgentRunner(dir string, logw io.Writer, trackerChanged func(), holders *wsholder.Manager) *wsagent.Runner {
+// trackerChanged runs after a conversation's successful tracker write;
+// agyActivity runs after a hosted agy turn settles.
+func newAgentRunner(dir string, logw io.Writer, trackerChanged, agyActivity func(), holders *wsholder.Manager) *wsagent.Runner {
+	modelWaitSeconds := wsagent.DefaultAgyModelWaitTimeoutSeconds
+	modelWaitRetries := wsagent.DefaultAgyModelWaitRetries
+	if name, _, err := wsagent.ResolveHostedPackage(); err == nil && name == "wsflow" {
+		modelWaitSeconds = 0
+	}
 	keys := mcp.NewAgentKeyStore()
 	backends := map[string]wsagent.BackendRegistration{
 		wsagent.BackendClaude: {Backend: wsagent.ClaudeBackend{}, LeadProfile: wsagent.LeadProfileClaude, PermissionModes: wsagent.LeadPermissionModes, PermissionLevels: wsagent.LeadPermissionLevels(), Catalog: wsagent.ClaudeCatalog(), ManualHarness: "claude", PlaybookCommands: true, WorkerCapable: true, WorkerProfile: wsagent.AgentWorkerProfile(wsagent.BackendClaude), WorkerHTTPMCP: true},
@@ -299,7 +308,7 @@ func newAgentRunner(dir string, logw io.Writer, trackerChanged func(), holders *
 		// Codex workers are daemon-owned like agy's: HTTP MCP, auto-approved
 		// inside the sandbox their authority selects (codexWorkerMode). Its
 		// native tool names are already valid, so no name scheme applies.
-		wsagent.BackendCodex: {Backend: wsagent.CodexBackend{}, LeadProfile: wsagent.LeadProfileCodex, PermissionModes: wsagent.CodexPermissionModes, Catalog: wsagent.CodexCatalog(), ManualHarness: wsagent.BackendCodex, WorkerCapable: true, WorkerProfile: wsagent.AgentWorkerProfile(wsagent.BackendCodex), WorkerHTTPMCP: true, WorkerAutoApprove: true},
+		wsagent.BackendCodex: {Backend: wsagent.CodexBackend{}, LeadProfile: wsagent.LeadProfileCodex, PermissionModes: wsagent.CodexPermissionModes, PermissionLevels: wsagent.LeadPermissionLevels(), Catalog: wsagent.CodexCatalog(), ManualHarness: wsagent.BackendCodex, WorkerCapable: true, WorkerProfile: wsagent.AgentWorkerProfile(wsagent.BackendCodex), WorkerHTTPMCP: true, WorkerAutoApprove: true},
 		// agy workers use the default agent and auto-allow its permission
 		// requests. It maps no common lead permission level yet. Both
 		// roles use HTTP MCP and underscore tool-name aliases.
@@ -313,10 +322,12 @@ func newAgentRunner(dir string, logw io.Writer, trackerChanged func(), holders *
 		}, ToolsAlwaysLoad: true, ManualHarness: wsagent.BackendAgy, PlaybookCommands: true, WorkerCapable: true, WorkerProfile: wsagent.AgentWorkerProfile(wsagent.BackendAgy), WorkerHTTPMCP: true, WorkerAutoApprove: true},
 	}
 	return wsagent.NewRunner(wsagent.Options{
-		Dir:           dir,
-		DaemonVersion: version,
-		Backends:      backends,
-		Keys:          keys,
+		Dir:                        dir,
+		DaemonVersion:              version,
+		AgyModelWaitTimeoutSeconds: &modelWaitSeconds,
+		AgyModelWaitRetries:        &modelWaitRetries,
+		Backends:                   backends,
+		Keys:                       keys,
 		// A lead session's process runs under a session holder with a lead
 		// key of its own.
 		Holders:  wsagent.ManagerHost{Manager: holders},
@@ -333,12 +344,16 @@ func newAgentRunner(dir string, logw io.Writer, trackerChanged func(), holders *
 		LeadManual: func(backend, dir, key string) (string, error) {
 			return renderLeadManual(hostedRender(backends[backend]), dir, key)
 		},
+		RestoreBundle: func(backend, dir, key string, cause wsagent.RestoreCause, children []wsagent.AgentChild) (string, error) {
+			return renderHostedRestoreBundle(hostedRender(backends[backend]), dir, key, cause, children)
+		},
 		PlaybookCommands: hostedPlaybookCommands,
 		ExpandCommand: func(backend, dir, key, name string) (string, error) {
 			return renderLeadPlaybook(hostedRender(backends[backend]), dir, key, name)
 		},
 		Log:            logw,
 		TrackerChanged: trackerChanged,
+		AgyActivity:    agyActivity,
 		// A spawned Pi subagent's settled turns go to its lead's mailbox.
 		Report: mcp.PiTurnReporter(logw),
 		// A Pi subagent's own pi.* calls (the token route) need a usable

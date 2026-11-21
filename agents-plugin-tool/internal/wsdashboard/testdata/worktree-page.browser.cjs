@@ -20,7 +20,7 @@ const route = p => '/w/' + p.replace(/\\/g, '/').replace(/^\//, '').split('/').m
     let page;
     async function active(path) {
       await tab.waitForURL(base + route(path));
-      await tab.waitForFunction(p => document.querySelector('iframe.sframe.on')?.contentDocument?.documentElement.getAttribute('data-worktree') === p, path);
+      await tab.waitForFunction(p => document.querySelector('iframe.sframe.on')?.contentDocument?.documentElement?.getAttribute('data-worktree') === p, path);
       page = await (await tab.locator('iframe.sframe.on').elementHandle()).contentFrame();
       await page.locator('#files .fentry[data-entry="worktree.txt"]').waitFor();
     }
@@ -88,6 +88,10 @@ const route = p => '/w/' + p.replace(/\\/g, '/').replace(/^\//, '').split('/').m
     await tab.screenshot({ path: '/tmp/exec5/wv-impl/worktree-page.png' });
     await tab.setViewportSize({ width: 2400, height: 1000 });
     await explorer.locator('.bc-pin').click();
+    // Pinning opens the gallery page at this width; return to the Main Board
+    // before clicking the terminal, whose board card is then inert offscreen.
+    await page.locator('#bgal .gal-dot.main').click();
+    await page.waitForFunction(() => !document.documentElement.hasAttribute('data-gal-away'));
     await page.locator('.bcard[data-kind="terminal"] .bc-pin').click();
     await tab.screenshot({ path: '/tmp/exec5/wv-impl/pinned-page.png' });
     // Drag uses the existing threshold and must not become a navigation.

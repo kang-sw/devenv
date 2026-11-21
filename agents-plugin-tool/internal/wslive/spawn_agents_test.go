@@ -114,3 +114,27 @@ func TestSpawnRowsMergeNativeDuplicatesInEitherArrivalOrder(t *testing.T) {
 		}
 	}
 }
+
+func TestMergeSpawnAgentsPreservesDaemonHoldingAndAlive(t *testing.T) {
+	st := NewState("lead-key")
+	if _, err := st.Apply(Event{
+		Kind: KindAgent, AgentID: "pi:child", AgentKind: AgentKindPi, SessionKey: "child-key",
+		Status: StatusDone, Holding: true, Alive: true,
+	}, 100); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Apply(Event{
+		Kind: KindAgent, AgentID: "native-child", SessionKey: "child-key",
+		Status: StatusRunning, Model: "native-model", ContextTokens: f64p(99),
+	}, 101); err != nil {
+		t.Fatal(err)
+	}
+	snap := st.Snapshot(102)
+	if len(snap.Agents) != 1 {
+		t.Fatalf("agents = %+v, want 1 merged row", snap.Agents)
+	}
+	a := snap.Agents[0]
+	if a.ID != "pi:child" || !a.Holding || !a.Alive || a.Model != "native-model" || a.ContextTokens != 99 {
+		t.Fatalf("merged row = %+v, want Holding=true Alive=true and native telemetry", a)
+	}
+}

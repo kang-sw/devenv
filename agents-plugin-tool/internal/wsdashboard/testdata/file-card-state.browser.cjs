@@ -10,7 +10,7 @@ const route = '/w/' + root.replace(/^\//, '').split('/').map(encodeURIComponent)
   fs.mkdirSync(evidence, { recursive: true });
   const browser = await chromium.launch({ headless: true });
   try {
-    const context = await browser.newContext({ viewport: { width: 1700, height: 1000 }, locale: 'en-US', reducedMotion: 'reduce' });
+    const context = await browser.newContext({ viewport: { width: 2560, height: 1000 }, locale: 'en-US', reducedMotion: 'reduce' });
     const tab = await context.newPage(), errors = [];
     tab.on('pageerror', e => errors.push(e.message));
     let page;
@@ -51,7 +51,7 @@ const route = '/w/' + root.replace(/^\//, '').split('/').map(encodeURIComponent)
     const pinned = await wait('WORKFLOW.md', 'preview');
     await card(pinned.id).locator('.bc-pin').click();
     await wait('WORKFLOW.md', 'pinned');
-    assert.equal(await card(pinned.id).evaluate(n => n.closest('.bpcol')?.id), 'bpcol');
+    assert.equal(await card(pinned.id).evaluate(n => n.closest('.bgal')?.id), 'bgal');
     assert.equal(await row('WORKFLOW.md').locator('.fstate').textContent(), 'Pinned');
     await row('another.txt').click();
     const next = await wait('another.txt', 'preview');
@@ -113,21 +113,21 @@ const route = '/w/' + root.replace(/^\//, '').split('/').map(encodeURIComponent)
       await page.waitForTimeout(100);
       await tab.screenshot({ path: path.join(evidence, filename) });
     }
-    await capture('dark', 1700, 'after-dark.png');
-    await capture('light', 1700, 'after-light.png');
+    await capture('dark', 2560, 'after-dark.png');
+    await capture('light', 2560, 'after-light.png');
     await capture('dark', 700, 'after-narrow.png');
     const placement = await page.evaluate(() => {
       const cards = window.WsCards.list('preview'), preview = cards.find(c => c.preview), board = document.querySelector('[data-region="board"]');
-      return { first: [...board.children].find(n => n.matches('.bcard, .bpins')) === preview.el, noPinColumn: !document.documentElement.hasAttribute('data-pincol'), italic: getComputedStyle(preview.name).fontStyle, outline: getComputedStyle(preview.el.querySelector('.bc-in')).outlineStyle };
+      return { first: [...board.children].find(n => n.matches('.bcard')) === preview.el, noPinColumn: !document.documentElement.hasAttribute('data-pincol'), italic: getComputedStyle(preview.name).fontStyle, outline: getComputedStyle(preview.el.querySelector('.bc-in')).outlineStyle };
     });
     assert.deepEqual(placement, { first: true, noPinColumn: true, italic: 'italic', outline: 'dashed' });
     fs.writeFileSync(path.join(evidence, 'placement.json'), JSON.stringify(placement, null, 2));
-    for (const width of [1599, 1600]) {
+    for (const width of [2000, 2560]) {
       await tab.setViewportSize({ width, height: 1000 });
-      await page.waitForFunction(wide => document.documentElement.hasAttribute('data-pincol') === wide, width >= 1600);
+      await page.waitForFunction(band4 => document.documentElement.hasAttribute('data-pincol') === (band4 && window.WsCards.docked().length > 0), width >= 2560);
     }
     // Both existing link entry points keep their default preview semantics.
-    await tab.setViewportSize({ width: 1700, height: 1000 });
+    await tab.setViewportSize({ width: 2560, height: 1000 });
     await tab.goto(base + '/s/livesession');
     await active();
     await page.evaluate(() => {

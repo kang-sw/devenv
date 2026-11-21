@@ -211,7 +211,13 @@ func (s *sessionStore) loadRecord(d sessionDirs, key string, parts recordPart, r
 	if read == nil {
 		read = readRecordFile
 	}
-	return loadRecordWith(d, key, parts, raw, read)
+	return loadRecordWithBoard(d, key, parts, raw, read, func(rec *sessionRecord, key string, raw io.Writer) error {
+		err := openWhiteboard(rec, key, raw)
+		if err == nil && s.boardOwner {
+			s.retireWhiteboardPages(rec.Root)
+		}
+		return err
+	})
 }
 
 // recordFileReader reads one record file and decodes it into a value

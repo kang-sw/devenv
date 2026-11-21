@@ -36,8 +36,9 @@ async function select(page, start, end = start) {
       if (!(await page.locator('#quote-first').isVisible())) await page.locator('[data-tab="board"]').first().click();
       const pop = view.locator('[data-wbmention-pop]'), input = view.getByRole('textbox', { name: 'Note about this selection (optional)' });
       const val = l => l.evaluate(e => ('value' in e) ? e.value : e.textContent);
-      const bundles = view.locator('#cchips .selection-bundle');
-      const attach = view.locator('[data-wbmention]'), chips = view.locator('#cchips .selection-source');
+      const bundles = view.locator('#ctext + .wsc-editor .wsc-mention');
+      const attach = view.locator('[data-wbmention]'), chips = bundles;
+      const bundleData = i => bundles.nth(i).evaluate(el => JSON.parse(el.getAttribute('data-wsc-payload')).selection);
       const composer = view.locator('#ctext + .wsc-editor'), backing = view.locator('#ctext');
       // A native pointer selection, followed by input focus that collapses it.
       await page.locator('#quote-first').click({ clickCount: 3 });
@@ -73,20 +74,20 @@ async function select(page, start, end = start) {
       await attach.click();
       assert.equal(await chips.count(), 1);
       assert.equal(await bundles.count(), 1);
-      assert.equal(await backing.inputValue(), '', 'a selection never writes into the composer text');
-      assert.equal(await bundles.nth(0).locator('.selection-source').getAttribute('data-wb-entry'), 'e7', 'source update and changed selection never retarget captured quote');
-      assert.match(await bundles.nth(0).locator('.selection-edit').getAttribute('title'), /First immutable quote[\s\S]*first note/);
+      assert.match(await backing.inputValue(), /\[mention:/, 'selection has an inline anchor');
+      assert.equal((await bundleData(0)).mentions[0].entry, 'e7', 'source update and changed selection never retarget captured quote');
+      assert.match(JSON.stringify(await bundleData(0)), /First immutable quote[\s\S]*first note/);
       assert.equal(sent.length, 0, 'attachment is not send');
       // Reset the source, then capture two immutable entries in DOM order.
       await fetch(updates + '?reset=1');
       await page.locator('#quote-first').waitFor({ state: 'visible' });
       await select(page, '#quote-first', '#quote-next');
       await input.fill('one note for both'); await attach.click();
-      assert.equal(await chips.count(), 3);
+      assert.equal(await chips.count(), 2);
       assert.equal(await bundles.count(), 2, 'one push, one bundle, even across two entries');
-      assert.equal(await bundles.nth(1).locator('.selection-source').count(), 2);
-      assert.match(await bundles.nth(1).locator('.selection-note').getAttribute('title'), /one note for both/);
-      assert.equal(await backing.inputValue(), '');
+      assert.equal((await bundleData(1)).mentions.length, 2);
+      assert.match((await bundleData(1)).comment, /one note for both/);
+      assert.match(await backing.inputValue(), /\[mention:/);
       // The production sandbox bridge dispatches a real selection report.
       // Its untrusted payload may not claim different topic/entry provenance.
       const frameEl = page.locator('iframe.doc-frame').first();
@@ -109,10 +110,10 @@ async function select(page, start, end = start) {
       await frameHandle.evaluate(f => f.remove());
       await tab.setViewportSize({ width: width - 10, height: 900 });
       await attach.click();
-      assert.equal(await chips.count(), 4);
+      assert.equal(await chips.count(), 3);
       assert.equal(await bundles.count(), 3);
-      assert.match(await bundles.nth(2).locator('.selection-edit').getAttribute('title'), /Sandbox selection text[\s\S]*sandbox note/);
-      assert.equal(await backing.inputValue(), '');
+      assert.match(JSON.stringify(await bundleData(2)), /Sandbox selection text[\s\S]*sandbox note/);
+      assert.match(await backing.inputValue(), /\[mention:/);
       let text = '';
       // Keyboard selection and the legacy empty-note attachment.
       await page.locator('#quote-next').scrollIntoViewIfNeeded();
@@ -123,29 +124,29 @@ async function select(page, start, end = start) {
       await input.waitFor({ state: 'visible' });
       assert.equal(await val(input), '');
       await attach.click();
-      assert.equal(await chips.count(), 5);
+      assert.equal(await chips.count(), 4);
       assert.equal(await bundles.count(), 4);
-      assert.equal(await backing.inputValue(), text, 'empty note adds no ordinary text');
+      assert.match(await backing.inputValue(), /\[mention:/, 'empty note still adds an inline source');
       // Repeated action cannot duplicate an attachment.
       await attach.dispatchEvent('click');
-      assert.equal(await chips.count(), 5);
+      assert.equal(await chips.count(), 4);
       // Session navigation saves only this session's draft, then restores all
       // contexts as editable text and all source locators independently.
       await goSession('boardsession');
       assert.equal(await page.locator('#ctext').inputValue(), '');
-      assert.equal(await page.locator('#cchips .selection-source').count(), 0);
+      assert.equal(await page.locator('#ctext + .wsc-editor .wsc-mention').count(), 0);
       await goSession('livesession');
-      assert.equal(await backing.inputValue(), text);
-      assert.equal(await chips.count(), 5);
+      assert.match(await backing.inputValue(), /\[mention:/);
+      assert.equal(await chips.count(), 4);
       assert.equal(await bundles.count(), 4);
       text = 'typed beside the groups';
-      await composer.fill(text);
+      await composer.press('End'); await composer.type(text);
       await tab.reload(); await activePage();
-      assert.equal(await backing.inputValue(), text, 'ordinary edits survive draft restore');
-      assert.equal(await chips.count(), 5);
+      assert((await backing.inputValue()).includes(text), 'ordinary edits survive draft restore');
+      assert.equal(await chips.count(), 4);
       assert.equal(sent.length, 0);
       await page.locator('#csend').click();
-      await page.waitForFunction(() => document.querySelector('#ctext').value === '' && !document.querySelector('#cchips .selection-bundle'));
+      await page.waitForFunction(() => document.querySelector('#ctext').value === '' && !document.querySelector('#ctext + .wsc-editor .wsc-mention'));
       assert.equal(sent.length, 1);
       assert.deepEqual(sent[0].mentions || [], [], 'sources travel inside their selection groups');
       const groups = [...sent[0].text.matchAll(/<wb:selection>\n([\s\S]*?)<\/wb:selection>/g)].map(m => m[1]);
@@ -155,9 +156,15 @@ async function select(page, start, end = start) {
       assert.match(groups[2], /<wb:mention topic="Plan" id="4" entry="e9">Sandbox selection text<\/wb:mention>\n<wb:comment>sandbox note<\/wb:comment>/);
       assert.match(groups[3], /entry="e8">[^<]*<\/wb:mention>\n<wb:comment><\/wb:comment>/);
       assert.equal(sent[0].text.replace(/<wb:selection>[\s\S]*?<\/wb:selection>\s*/g, '').trim(), text, 'typed text stays outside the groups');
+      const cancel = page.locator('#r-convlive [data-cancel]').last();
+      await cancel.waitFor({ state: 'attached' });
+      await cancel.evaluate(el => el.click());
+      await page.waitForFunction(() => document.querySelectorAll('#ctext + .wsc-editor .wsc-mention').length === 4);
+      assert((await backing.inputValue()).includes(text), 'cancel restores prose beside inline selection capsules');
+      assert.equal((await bundleData(0)).mentions[0].entry, 'e7', 'cancel restores selection metadata');
       // Plain selection dismissal still follows selection collapse/Escape.
       await select(page, '#quote-next'); await input.waitFor({ state: 'visible' });
-      await tab.keyboard.press('Escape'); assert.equal(await pop.isVisible(), false);
+      await input.focus(); await input.press('Escape'); assert.equal(await pop.isVisible(), false);
       await select(page, '#quote-first'); await input.waitFor({ state: 'visible' });
       await page.evaluate(() => getSelection().removeAllRanges());
       await pop.waitFor({ state: 'hidden' });

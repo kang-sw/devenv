@@ -262,6 +262,32 @@ func TestPickShell(t *testing.T) {
 	}
 }
 
+func TestSessionTerminalDropsInheritedHarnessSessionEnv(t *testing.T) {
+	environ := []string{
+		"SHELL=/bin/zsh", "PATH=/usr/bin", "HOME=/home/user", "USER_SETTING=kept",
+		"WS_MAILBOX=parent@machine", "WS_MAILBOX_AUTO=1", "WS_MCP_ROOT=/parent/root",
+		"WS_RSRC=/parent/rsrc", "WS_RSRC_ROOT=/parent/rsrc-root", "WS_SKILLS_ROOT=/parent/skills",
+		"WS_HOSTED_SESSION=1", "WS_HOSTED_SESSION_KEY=parent-key",
+	}
+	got := pickShell("linux", environ, func(name string) (string, bool) { return name, name == "/bin/zsh" })
+	for _, name := range []string{"SHELL", "PATH", "HOME", "USER_SETTING"} {
+		if got.Env[name] == "" {
+			t.Errorf("ordinary user environment %s was dropped: %v", name, got.Env)
+		}
+	}
+	for name := range got.Env {
+		for _, prefix := range []string{"WS_MAILBOX", "WS_MCP_", "WS_RSRC", "WS_SKILLS_ROOT", "WS_HOSTED_"} {
+			if strings.HasPrefix(name, prefix) {
+				t.Errorf("inherited harness-session environment %s survived: %v", name, got.Env)
+			}
+		}
+	}
+	windows := pickShell("windows", append(environ, "Ws_McP_SeSsIoN_ToKeN=parent-token"), func(name string) (string, bool) { return name, true })
+	if _, ok := windows.Env["Ws_McP_SeSsIoN_ToKeN"]; ok {
+		t.Fatalf("mixed-case inherited harness identity survived in a Windows terminal: %v", windows.Env)
+	}
+}
+
 // TestTerminalFolder pins the folder a create request resolves to: the
 // session's own root by default, the main root of a linked worktree's
 // repository for "root", a typed absolute folder for "path", and a refusal

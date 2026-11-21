@@ -59,7 +59,8 @@ func stagePiPayloadInputs(stateDir, name string) (string, error) {
 	if err := collect(owner, func(path string) bool {
 		return strings.HasPrefix(path, "rsrc/") || strings.HasPrefix(path, "skills/") ||
 			path == ".claude-plugin/" || path == ".claude-plugin/plugin.json" || path == "config-manifest.json" ||
-			path == "runtime.json" || path == "dashboard-config-manifest.json" || path == "bin/ws-mcp-launcher.py"
+			path == "agy-config-manifest.json" || path == "runtime.json" || path == "dashboard-config-manifest.json" ||
+			path == "bin/ws-mcp-launcher.py"
 	}); err != nil {
 		return "", err
 	}

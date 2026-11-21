@@ -22,8 +22,8 @@ function runAsync(command, args) {
 }
 const sha = data => crypto.createHash('sha256').update(data).digest('hex');
 
-test('version compare is numeric x.y.z and ignores prereleases', () => {
-  assert.deepEqual(u.parseVersion('v0.50.0'), [0, 50, 0]);
+test('version compare accepts stable and bounded canary versions only', () => {
+  assert.deepEqual(u.parseVersion('v0.50.0'), { core: [0, 50, 0], channel: 'stable', canary: null, version: '0.50.0' });
   assert.equal(u.parseVersion('v0.51.0-rc.1'), null);
   assert.equal(u.isNewer('v0.50.0', '0.49.9'), true);
   assert.equal(u.isNewer('v0.50.10', '0.50.9'), true);

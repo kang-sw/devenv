@@ -40,7 +40,9 @@ const railMessageRunes = 160
 
 // RailView is what the rail region renders.
 type RailView struct {
-	Workspaces []RailWorkspace
+	Workspaces         []RailWorkspace
+	PendingWorkspaces  []RailWorkspace
+	RejectedWorkspaces []RailWorkspace
 	// Live counts the live sessions; CountPolicy sums their open policy
 	// and check items, and CountApproval counts those waiting on a tool approval
 	// (RailRow.Approval).
@@ -86,6 +88,55 @@ type RailWorkspace struct {
 	// Sessions are the live sessions, Ended the ended ones, of a plain
 	// folder; Archived its archived hosted leads (splitRailArchived).
 	Sessions, Ended, Archived []RailRow
+	newestRegisteredAt        time.Time
+}
+
+// ParentPath returns the parent directory prefix with a trailing path
+// separator for display under the workspace name.
+func (w RailWorkspace) ParentPath() string {
+	if w.Path == "" {
+		return ""
+	}
+	dir := filepath.Dir(filepath.Clean(w.Path))
+	if dir == "" || dir == "." {
+		return ""
+	}
+	sep := string(filepath.Separator)
+	if strings.HasSuffix(dir, sep) {
+		return dir
+	}
+	return dir + sep
+}
+
+// AllSessions flattens live (including nested children), ended, and archived
+// session rows across plain-folder or repository worktrees.
+func (w RailWorkspace) AllSessions() []RailRow {
+	var out []RailRow
+	var addLive func([]RailRow)
+	addLive = func(rows []RailRow) {
+		for _, r := range rows {
+			out = append(out, r)
+			if len(r.Children) > 0 {
+				addLive(r.Children)
+			}
+		}
+	}
+	addGroup := func(live, ended, archived []RailRow) {
+		addLive(live)
+		out = append(out, ended...)
+		out = append(out, archived...)
+	}
+	addGroup(w.Sessions, w.Ended, w.Archived)
+	for _, wt := range w.Worktrees {
+		addGroup(wt.Sessions, wt.Ended, wt.Archived)
+	}
+	return out
+}
+
+// SessionCount returns the number of listed sessions in the workspace across
+// live, ended, and archived folds.
+func (w RailWorkspace) SessionCount() int {
+	return len(w.AllSessions())
 }
 
 // RailWorktree is one worktree of a repository.
@@ -429,6 +480,12 @@ func buildRailView(sessions []railInput, repos map[string]railRepo, stored []sto
 			if m.row.Approval != nil {
 				ws.Approvals++
 			}
+			if at, err := time.Parse(time.RFC3339Nano, m.in.Session.Registration.RegisteredAt); err == nil {
+				at = at.UTC()
+				if ws.newestRegisteredAt.IsZero() || at.After(ws.newestRegisteredAt) {
+					ws.newestRegisteredAt = at
+				}
+			}
 		}
 		if !ws.Repo {
 			regs := map[string]Registration{}
@@ -562,6 +619,67 @@ func buildRailView(sessions []railInput, repos map[string]railRepo, stored []sto
 		view.Workspaces = append(view.Workspaces, ws)
 	}
 	return view
+}
+
+// partitionRailWorkspaces splits presentation after layout, archive, admission,
+// and memo passes: Workspaces retains only explicitly stored workspaces;
+// unstored roots route to RejectedWorkspaces (plus session-less rejected paths
+// for Undo) or PendingWorkspaces (omitting unstored roots with zero visible
+// sessions).
+func partitionRailWorkspaces(view *RailView, rejected []string) {
+	if view == nil {
+		return
+	}
+	rejSet := make(map[string]bool, len(rejected))
+	for _, p := range rejected {
+		if p != "" {
+			rejSet[admissionPathKey(p)] = true
+		}
+	}
+	var explicit, pending, rej []RailWorkspace
+	storedSet := make(map[string]bool, len(view.Workspaces))
+	seenRej := make(map[string]bool, len(rejected))
+	for _, ws := range view.Workspaces {
+		k := admissionPathKey(ws.Path)
+		if ws.Stored {
+			explicit = append(explicit, ws)
+			storedSet[k] = true
+			continue
+		}
+		if rejSet[k] {
+			rej = append(rej, ws)
+			seenRej[k] = true
+			continue
+		}
+		if ws.SessionCount() > 0 {
+			pending = append(pending, ws)
+		}
+	}
+	for _, p := range rejected {
+		if p == "" {
+			continue
+		}
+		p = filepath.Clean(p)
+		k := admissionPathKey(p)
+		if storedSet[k] || seenRej[k] {
+			continue
+		}
+		seenRej[k] = true
+		rej = append(rej, RailWorkspace{Name: lastElem(p), Path: p})
+	}
+	sort.SliceStable(pending, func(i, j int) bool {
+		a, b := pending[i], pending[j]
+		if !a.newestRegisteredAt.Equal(b.newestRegisteredAt) {
+			return a.newestRegisteredAt.After(b.newestRegisteredAt)
+		}
+		return a.Path < b.Path
+	})
+	sort.SliceStable(rej, func(i, j int) bool {
+		return rej[i].Path < rej[j].Path
+	})
+	view.Workspaces = explicit
+	view.PendingWorkspaces = pending
+	view.RejectedWorkspaces = rej
 }
 
 // sortRailRows orders live sessions by registration, oldest first: the

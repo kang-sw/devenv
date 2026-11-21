@@ -85,7 +85,7 @@
 <script>
 (async function () {
   var base = '../../../agents-plugin-tool/internal/wsdashboard/assets/';
-  var files = ['tracker.js', 'tracker-panel.js', 'tracker-wiki.js', 'tracker-window.js', 'tracker-forms.js', 'tracker-menu.js', 'tracker-writes.js', 'tracker-render.js', 'tracker-mount.js'];
+  var files = ['tracker.js', 'tracker-panel.js', 'tracker-wiki.js', 'tracker-window.js', 'tracker-forms.js', 'tracker-menu.js', 'tracker-picker.js', 'tracker-writes.js', 'tracker-render.js', 'tracker-mount.js'];
   var source = await Promise.all(files.map(async function (name) {
     var response = await fetch(base + name);
     if (!response.ok) throw new Error('Cannot load ' + name + ': ' + response.status);

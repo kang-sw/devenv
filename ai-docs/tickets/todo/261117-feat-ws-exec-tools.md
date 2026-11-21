@@ -1,8 +1,9 @@
 ---
-title: "ws/exec tools: daemon-owned command execution with async conversion, completion push, and native process-tool removal"
+title: "ws/exec 도구: 비동기 전환, 완료 푸시, 네이티브 프로세스 도구 제거를 포함한 데몬 소유 명령 실행"
 parent: 261114-epic-ws-common-session-foundation
 related:
-  261117-feat-ws-single-session-holder: prerequisite
+  261117-feat-ws-single-session-holder: "idea-only context; not a prerequisite to the per-job holder start"
+  261120-refactor-ws-agent-workers-under-holders: "landed holder-per-process pattern reused by per-job exec holders (merge 92c12990a)"
   261112-feat-pi-subagent-long-shell-auto-background: "absorbed; dropped (43); origin of the exec concept (owner, 2026-11-13)"
   261117-feat-ws-exec-mux-terminal: "owns the PTY mux direction split out of this ticket (51)=a"
   261114-feat-ws-conversation-audit-event-store: "future consumer of daemon-visible exec I/O"
@@ -24,8 +25,10 @@ background conversion, completion push and cleanup. Pi prototype for reference:
 30 s window, 4 KB, kills on timeout; `background:true` makes a task with a steer
 push) and `agents-plugin-pi/src/background-tasks.ts` (tasks die at
 `session_shutdown`). The daemon already has `internal/execjob` and 8 `exec.*` MCP
-tools; this ticket generalizes them. Prerequisite: the single session holder
-(`261117-feat-ws-single-session-holder`, (17)=a).
+tools; this ticket generalizes them. It starts with one thin holder per exec job,
+reusing the holder-per-process model landed for `agent.spawn` workers by
+`261120-refactor-ws-agent-workers-under-holders` (merge `92c12990a`). The
+single-session-holder ticket is optional future consolidation, not a prerequisite.
 
 ## Decisions
 
@@ -50,7 +53,9 @@ tools; this ticket generalizes them. Prerequisite: the single session holder
      `exec.run(exe: "pwsh", ...)`. Rejected: per-call shell selection.
    - (51)=a: mux (PTY screen sessions) is out of scope here, owned by
      `261117-feat-ws-exec-mux-terminal`.
-2. **Runs under the single holder (17)=a**, surviving daemon replacement.
+2. **Runs under one holder per exec job**, following the landed `agent.spawn`
+   holder-per-process model and surviving daemon replacement. A future shared
+   holder may consolidate jobs but is not a prerequisite.
 3. **Built on `internal/execjob`:** the foreground window changes from 5 s to the
    30 s config key, polling becomes completion push, per-job files become the
    holder memory ring (deltas only for restore). The existing 8 `exec.*` MCP tools
@@ -99,17 +104,19 @@ tools; this ticket generalizes them. Prerequisite: the single session holder
 ## Compatibility
 
 New `exec.*` tool shapes are additive (T0); the 8 old `exec.*` tools stay as
-aliases (T0). Holder protocol compatibility is owned by the holder ticket. The
-concrete verdict cites source lines for which version writes and reads what, per
-`ai-docs/manuals/release-compatibility.md`, recorded in Phase 1's Result.
+aliases (T0). Any exec-specific holder protocol change states its compatibility
+tier here. The concrete verdict cites source lines for which version writes and
+reads what, per `ai-docs/manuals/release-compatibility.md`, recorded in Phase 1's
+Result.
 
 ## Phases
 
-### Phase 1: exec.run/stop/tail/list over the holder, push completion, approval
+### Phase 1: exec.run/stop/tail/list over per-job holders, push completion, approval
 
 Implement `exec.run`, `exec.shell`, `exec.stop`, `exec.tail`, `exec.list` and
-`exec.write` (pipe stdin) on top of `internal/execjob` and the single holder with
-the 30 s config-key window, async conversion, completion system mail, process-tree
+`exec.write` (pipe stdin) on top of `internal/execjob` and one thin holder per
+exec job, reusing the landed `agent.spawn` holder-per-process lifecycle, with the
+30 s config-key window, async conversion, completion system mail, process-tree
 kill, holder-memory output, and the old 8 tools as aliases; daemon-owned approval
 via ws command rules then the dashboard UI, with permission-profile caps; verify
 whether Claude raises `can_use_tool` for MCP tools and allowlist `ws/exec.*`

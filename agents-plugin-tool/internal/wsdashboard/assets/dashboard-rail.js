@@ -25,7 +25,6 @@
   var rdrag = null, railSaving = 0, railMinGen = 0;
   var railGate = WsRail ? WsRail.swapGate(function () { return !!rdrag || railEditing() || railSaving > 0; }) : null;
   var RAIL_WIDE = window.matchMedia ? window.matchMedia("(min-width: 1600px)") : null;
-  var RAIL_XWIDE = window.matchMedia ? window.matchMedia("(min-width: 2200px)") : null;
   var RAIL_SCROLL_KEY = "ws.dashboard.railscroll";
   var RENAME_NEW = "ws.dashboard.renameNew", renameNewFrame = null;
   // Reload must not replay an unconsumed creation intent. Frames share the
@@ -44,7 +43,7 @@
   // popover; a framed page's header stays an invisible placeholder.
   var topEl = doc.querySelector(".dwrap > .top");
   var usageGutter = railEl && topEl && window.WsUsage ? window.WsUsage.mount(doc, topEl) : null;
-  function railWide() { return !!(RAIL_WIDE && RAIL_WIDE.matches) && (!root.hasAttribute("data-pincol") || !!(RAIL_XWIDE && RAIL_XWIDE.matches)); }
+  function railWide() { return !!(RAIL_WIDE && RAIL_WIDE.matches); }
   function railShown() { return root.classList.contains("rail-open"); }
   // Ctrl+` toggles rail + memos in overlay mode, memos alone beside a column;
   // a framed page hands it to the shell, which holds the rail.
@@ -260,12 +259,13 @@
       correction.appendChild(line);
     }
     admissionDraft.forEach(function (d) { if (!seen[admissionKey(d)]) correctionRow(d, wsT("js.admission.fix.missing", d.path), null); });
-    var cap = r.querySelector(".rcap"), ap = admissionDraft.filter(function (d) { return d.action === "approve"; }).length;
-    var reject = admissionDraft.filter(function (d) { return d.action === "reject"; }).length;
-    cap.hidden = !admissionDraft.length; railEl.classList.toggle("capon", !!admissionDraft.length);
+    var wsCounts = typeof wsAdmissionDraft === "undefined" ? { approve: 0, reject: 0 } : wsAdmissionSync();
+    var cap = r.querySelector(".rcap"), ap = admissionDraft.filter(function (d) { return d.action === "approve"; }).length + wsCounts.approve;
+    var reject = admissionDraft.filter(function (d) { return d.action === "reject"; }).length + wsCounts.reject;
+    cap.hidden = !(admissionDraft.length + wsCounts.approve + wsCounts.reject); railEl.classList.toggle("capon", !cap.hidden);
     var ok = cap.querySelector(".ok"), no = cap.querySelector(".no");
     ok.hidden = !ap; ok.textContent = wsT("js.admission.cap.approve", ap); no.hidden = !reject; no.textContent = wsT("js.admission.cap.reject", reject);
-    cap.querySelector("[data-admission-apply]").disabled = admissionBusy;
+    cap.querySelector("[data-admission-apply]").disabled = admissionBusy || !!wsAdmissionBusy;
     // A copied prompt needs no notice (Apply toasts it, and the rejected
     // list's header copies it again); only a failed copy stays, until its
     // close, which outlives a reload, or a later successful copy.
@@ -337,7 +337,7 @@
     clearTimeout(rtoastTimer);
     rtoastTimer = setTimeout(function () { rtoastEl.classList.remove("on"); }, 5000);
   }
-  function admissionSubmit(selections) {
+  function admissionSubmit(selections, report) {
     if (admissionBusy || !selections.length) return;
     admissionBusy = true; railSaving++; admissionMessage = wsT("js.admission.applying"); admissionDetail = ""; admissionSync();
     var ctl = window.AbortController ? new AbortController() : null;
@@ -361,7 +361,8 @@
           var n = { approve: 0, reject: 0, undo: 0 };
           selections.forEach(function (s) { n[s.action] = (n[s.action] || 0) + 1; });
           // The rejection is already persisted; the copy comes after it (1101).
-          if (v.prompt) admissionCopy(v.prompt, function (ok) { admissionToast(n, ok); });
+          if (v.prompt) admissionCopy(v.prompt, function (ok) { if (report) report(true); else admissionToast(n, ok); });
+          else if (report) report(true);
           else admissionToast(n, true);
         } else {
           (v.stale || selections).forEach(function (s) {
@@ -373,19 +374,21 @@
           // The route's message is English diagnostics: the title keeps it.
           admissionMessage = wsT(answer.status === 409 ? "js.admission.stale" : answer.status === 400 ? "js.admission.invalid" : "js.admission.notwritten");
           admissionDetail = v.message || "";
+          if (report) report(false);
         }
-      }).catch(function () { admissionMessage = wsT("js.admission.unconfirmed"); admissionDetail = ""; })
+      }).catch(function () { admissionMessage = wsT("js.admission.unconfirmed"); admissionDetail = ""; if (report) report(false); })
       .then(function () { clearTimeout(timer); admissionBusy = false; railSaving--; admissionSync(); railRelease(); });
   }
   function admissionClick(t) {
+    if (wsAdmissionClick(t)) return true;
     var b = t.closest && t.closest("[data-admission-action], [data-admission-clear], [data-admission-apply], [data-admission-copy], [data-admission-copy-all], [data-admission-dismiss], [data-admission-clear-row], [data-admission-reselect], .admission-undo");
     if (!b) return false;
     if (b.hasAttribute("data-admission-dismiss")) { admissionDismiss(); return true; }
     if (admissionBusy) return true;
-    if (b.hasAttribute("data-admission-clear")) { admissionDraft = []; admissionMessage = ""; admissionSave(); }
+    if (b.hasAttribute("data-admission-clear")) { admissionDraft = []; admissionMessage = ""; wsAdmissionClear(); admissionSave(); }
     else if (b.hasAttribute("data-admission-copy")) admissionCopy(admissionPrompt && admissionPrompt.text);
     else if (b.hasAttribute("data-admission-copy-all")) admissionCopy(b.getAttribute("data-copy"));
-    else if (b.hasAttribute("data-admission-apply")) admissionSubmit(admissionDraft.slice());
+    else if (b.hasAttribute("data-admission-apply")) { if (wsAdmissionSelections().length) wsAdmissionApply(admissionDraft.slice()); else admissionSubmit(admissionDraft.slice()); }
     else {
       var row = b.closest(".rwt"), s = admissionEvidence(row, b.getAttribute("data-admission-action") || "undo"), old = admissionFind(s);
       if (b.hasAttribute("data-admission-clear-row")) admissionClear(s);
@@ -509,7 +512,7 @@
       e.preventDefault();
       railKey();
     });
-    [RAIL_WIDE, RAIL_XWIDE].forEach(function (m) { if (m && m.addEventListener) m.addEventListener("change", function () { railOpen(false); }); });
+    if (RAIL_WIDE && RAIL_WIDE.addEventListener) RAIL_WIDE.addEventListener("change", function () { railOpen(false); });
     if (topEl) {
       topEl.addEventListener("click", function (e) {
         var usage = e.target.closest && e.target.closest(".usage-toggle");
@@ -529,7 +532,7 @@
       }
       var settings = t.closest && t.closest(".settings-toggle");
       if (settings && gmenu) { e.preventDefault(); railPopOpen("settings", settings); return; }
-      var add = t.closest && t.closest(".radd");
+      var add = t.closest && t.closest(".radd, .rail-empty-add");
       if (add) {
         e.preventDefault();
         railPopOpen(add.getAttribute("data-add"), add);
@@ -1043,8 +1046,10 @@
     doc.addEventListener("pointerup", rdEnd);
     doc.addEventListener("pointercancel", rdEnd);
     // A press the window loses (another window took the focus) ends there,
-    // so a release it never hears does not hold the rail's swaps.
-    window.addEventListener("blur", function () { rdEnd(null); });
+    // so a release it never hears does not hold the rail's swaps. Focusing
+    // a session iframe also blurs the parent window while the document
+    // still has focus; that must not cancel a drag over the rail.
+    window.addEventListener("blur", function () { if (!doc.hasFocus()) rdEnd(null); });
     railEl.addEventListener("click", function (e) { if (rdragged) { e.preventDefault(); e.stopPropagation(); } }, true);
     railEl.addEventListener("dragstart", function (e) { if (e.target.closest && e.target.closest(".rs, .wsbar, .wthd")) e.preventDefault(); });
     // A dragged touch is a drag, not a scroll or the long-press menu.

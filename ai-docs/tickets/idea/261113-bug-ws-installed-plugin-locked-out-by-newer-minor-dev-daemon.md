@@ -1,5 +1,5 @@
 ---
-title: "Installed plugin is locked out when a dev rebuild brings up a daemon one minor ahead"
+title: "개발 재빌드가 마이너 버전이 하나 앞선 데몬을 띄울 때 설치된 플러그인이 차단되는 문제"
 ---
 
 # Installed plugin is locked out when a dev rebuild brings up a daemon one minor ahead

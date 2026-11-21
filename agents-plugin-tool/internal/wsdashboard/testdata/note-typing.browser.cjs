@@ -1,4 +1,4 @@
-// Static large-board harness: real CSS, capsule editor and composer chip owners.
+// Static large-board harness: real CSS, capsule editor and inline composer note.
 // WS_NOTE_BASELINE optionally reads pre-fix dashboard-composer.js/dashboard-rail.css.
 // WS_NOTE_TRACE_DIR optionally retains the invalidation trace; otherwise memory only.
 const assert = require('node:assert/strict');
@@ -8,7 +8,8 @@ const { chromium } = require(process.env.WS_PLAYWRIGHT_MODULE);
 const { readAssetSource } = require('./asset-source.cjs');
 const assets = path.join(__dirname, '../assets');
 const baseline = process.env.WS_NOTE_BASELINE;
-const composer = fs.readFileSync(path.join(baseline || assets, 'dashboard-composer.js'), 'utf8');
+const source = baseline ? fs.readFileSync(path.join(baseline, 'dashboard-composer.js'), 'utf8') : readAssetSource('wsdashboard', 'dashboard.js');
+const composer = source.slice(source.indexOf('  // --- composer:'));
 function func(name) {
   const match = composer.match(new RegExp('\\n  function ' + name + '\\([^\\n]*\\{[^\\n]*\\}\\n|\\n  function ' + name + '\\([\\s\\S]*?\\n  \\}\\n'));
   assert(match, 'missing production function ' + name);
@@ -43,7 +44,10 @@ function func(name) {
     await page.evaluate(() => document.querySelector('.tnote').focus());
     await page.keyboard.type('warmup');
     await page.waitForTimeout(100);
-    await page.evaluate(() => { window.firstChip = document.querySelector('[data-tchip]'); });
+    assert(await page.evaluate(() => {
+      const note = document.querySelector('#ctext').wsc.ordered().find(r => r.kind === 'topic-note' && r.key === 't0');
+      return note?.payload.note === 'warmup';
+    }), 'warmup note appears in inline composer');
     const cdp = await page.context().newCDPSession(page), events = [];
     cdp.on('Tracing.dataCollected', e => events.push(...e.value));
     await cdp.send('Tracing.start', { categories: 'toplevel,devtools.timeline,blink,disabled-by-default-devtools.timeline.invalidationTracking', transferMode: 'ReportEvents' });
@@ -68,7 +72,11 @@ function func(name) {
     if (!baseline) {
       assert(style.length > 0, 'trace contains measured style work');
       assert(Math.max(...counts) < 100, 'typing never restyles the whole document');
-      assert(await page.evaluate(() => firstChip === document.querySelector('[data-tchip]')), 'topic chip survives all 50 inputs');
+      assert(await page.evaluate(() => {
+        const rows = document.querySelector('#ctext').wsc.ordered().filter(r => r.kind === 'topic-note' && r.key === 't0');
+        return rows.length === 1 && rows[0].payload.note === document.querySelector('.tnote').value &&
+          document.querySelectorAll('#ctext + .wsc-editor [data-wsc-kind="topic-note"][data-wsc-key="t0"]').length === 1;
+      }), 'inline topic note tracks all 50 inputs');
     }
     // Native Korean IME composition follows the same board-input path.
     for (const text of ['ㅎ', '하', '한', '한ㄱ', '한그', '한글']) {
@@ -77,11 +85,14 @@ function func(name) {
     await cdp.send('Input.insertText', { text: '한글' });
     const state = await page.evaluate(() => {
       const field = document.querySelector('.tnote');
-      return { value: field.value, chip: document.querySelector('[data-tchip] .anote').textContent, capsules: field.wsc.snapshot() };
+      const rows = document.querySelector('#ctext').wsc.ordered().filter(r => r.kind === 'topic-note' && r.key === 't0');
+      return { value: field.value, inlineNotes: rows, label: document.querySelector('#ctext + .wsc-editor [data-wsc-kind="topic-note"][data-wsc-key="t0"]')?.textContent, capsules: field.wsc.snapshot() };
     });
     assert(state.value.endsWith('한글'));
-    assert.equal(state.chip, state.value.trim());
+    assert.equal(state.inlineNotes.length, 1);
+    assert.equal(state.inlineNotes[0].payload.note, state.value.trim());
+    assert(state.label.includes('한글'), 'inline topic note displays the composed text');
     assert.deepEqual(state.capsules, []);
-    console.log('note typing: native input, backing value, chips and Korean IME passed');
+    console.log('note typing: native input, backing value, inline composer note and Korean IME passed');
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

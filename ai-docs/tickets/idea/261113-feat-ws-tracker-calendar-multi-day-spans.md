@@ -1,5 +1,5 @@
 ---
-title: "Tracker calendar renders items across start..due as multi-day spans"
+title: "tracker 캘린더에서 start..due 기간 항목을 다일(multi-day) 스팬으로 렌더링"
 related:
   261113-feat-ws-tracker-start-date-range-picker: "prerequisite (adds the start field); owner answer (480)"
 ---

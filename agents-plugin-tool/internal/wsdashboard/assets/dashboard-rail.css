@@ -17,6 +17,8 @@
 .rail > .r-rail { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 .rscrim { display: none; }
 @media (min-width: 1600px) {
+  .dwrap:not(.narrow) { max-width: none; }
+  .dlanding { --dl-r: var(--dl-x); }
   .dbody { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 0 16px; align-items: start; }
   .dash.live .dbody, .dash.history .dbody { flex: 1 1 0; min-height: 0; align-items: stretch; }
   .dash.live .dbody > .dgrid.live, .dash.history .dbody > .dgrid.history { min-height: 0; }
@@ -26,6 +28,11 @@
   .dwrap > .top > .back { display: none; }
   .dwrap > .top { margin-left: calc(340px + 16px); }
   .dbody > .rail { margin: calc(-1 * var(--toph)) 0 0 -4px; }
+  :root:not([data-mode="index"]):not([data-pincol]):not([data-gal="empty"]):not([data-gal="drag"]) .dbody > .dgrid { width: 100%; max-width: var(--stagew); margin-inline: auto; }
+  :root:not([data-shell]):not([data-pincol]):not([data-gal="empty"]):not([data-gal="drag"]) .dash:not(.index):not(.tk-paged) > .dwrap { --stage-side: max(0px, (100% - 356px - var(--stagew)) / 2); }
+  :root:not([data-shell]):not([data-pincol]):not([data-gal="empty"]):not([data-gal="drag"]) .dash:not(.index):not(.tk-paged) > .dwrap > .top { margin-left: calc(356px + var(--stage-side)); margin-right: var(--stage-side); }
+  :root:not([data-shell]):not([data-pincol]):not([data-gal="empty"]):not([data-gal="drag"]) .dash:not(.index):not(.tk-paged) > .dwrap > .top:is(.dr-room, .tk-room) { padding-right: max(0px, calc(var(--drhw, 0px) + var(--tkhw, 0px) + 6px - var(--stage-side, 0px))); }
+  :root[data-shell] .dwrap > .top { margin-left: calc(356px + var(--sh-stage-side, 0px)); margin-right: var(--sh-stage-side, 0px); }
 }
 @media (max-width: 1599.98px) {
   .rail { position: fixed; z-index: 45; top: 12px; bottom: 12px; left: 12px; width: 340px; max-width: calc(100vw - 24px); box-shadow: var(--wb-shadow-hi); transform: translateX(calc(-100% - 20px)); visibility: hidden; transition: transform .22s cubic-bezier(.2, .7, .3, 1), visibility 0s linear .22s; }
@@ -33,113 +40,180 @@
   .rscrim { display: block; position: fixed; inset: 0; z-index: 44; background: var(--scrim); opacity: 0; pointer-events: none; transition: opacity .22s; }
   .rail-open .rscrim { opacity: 1; pointer-events: auto; }
 }
-/* ===== pinned column (cards.js, dashboard.js board cards) =====
-   Pinned topics and cards stand in the pin list (.bpins). It is the board
-   region's first node, a "Pinned" group, unless the pinned column shows:
-   from 1600px, while anything is pinned and the layout menu is not
-   "tabs", the page sets data-pincol on the root and the list moves into
-   the column (.bpcol), the page body's last grid column. Below 2200px the
-   column takes the session rail's place and the rail overlays as it does
-   below 1600px (the arrow and Ctrl+` open it); from 2200px both show, and
-   the column shows with nothing pinned too, so its handle sizes the board
-   before the first pin: its empty pin list is the idle pin zone's quiet
-   "drop here" placeholder (as .bpzone below), lit while a drag runs. The
-   store page (.tk-spage) takes the hidden grid's cell in every one of
-   these grids. The board keeps its no-pin width (--pbw: the 1680px page
-   less its paddings, the rail and its gap; the board-first page's 900px
-   column), narrowed to leave the column 480px, and the column fills the
-   window's remaining width to its right, so the page fills the window. The
-   handle on the column's left edge, in the gap toward the board, drags the
-   board's width (--boardw with data-boardw, kept by cards.js; the column
-   keeps 280px at least: a width saved on a wider window is clamped to what
-   this window leaves, the column's 280px and the gaps). On the live page
+/* ===== paged docking gallery (cards.js #bgal, gallery.js) =====
+   Docked topics and cards stand in the gallery: pages of panes, one page
+   shown at a time in a clipped viewport (.gal-viewport); the others stay
+   mounted, translated a page height and a 24px gap per position out of
+   it (--gal-off; the gap keeps a neighbour from touching the clip edge,
+   which IntersectionObserver still counts as intersecting), so
+   intersection observers count them out of view and their frames keep
+   their documents (never display, visibility, opacity or
+   content-visibility). A vertical dot rail (.gal-rail) left of the
+   viewport lists the pages: each dot shows its pane count, + the trailing
+   empty page (.gal-plus), and in the narrow view ⌂ the Main Board (Page
+   0). The page sets data-gal on the root (dashboard-board.js): "col" from
+   1600px with a docked page (with data-pincol: the gallery is the page
+   body's last grid column, its width handle .bp-edge on its left edge,
+   when the right-side space fits the board pane; the session rail stays
+   docked left); "drag" and "empty" use that same wide slot without a
+   docked page; "narrow" uses a paged gallery over the board's column
+   when the wide slot does not fit or the layout is "tabs" (placed by
+   --gal-left/top/width/height; data-away moves it off the window while
+   that column is hidden). The store page (.tk-spage) takes the grid's cell in
+   every one of these grids. The board keeps its no-gallery width (--pbw:
+   the 1680px page less its paddings, the rail and its gap; the
+   board-first page's 900px column), narrowed to leave the column 480px,
+   and the column fills the window's remaining width to its right. The
+   handle drags the board's width (--boardw with data-boardw, kept by
+   cards.js; the column keeps 280px at least: a width saved on a wider
+   window is clamped to what this window leaves). On the live page
    --boardw is the board's own column, not its cell: the cell is the
    conversation's width (--cvw: --convow, else the stylesheet's 5:7 share
    of the board), the grid's 16px gap and the board's, so each handle
    moves only the panel on its left and the column takes the difference.
-   The column scrolls on its own. */
+   A docked unit fills its pane: a card's body flexes (its stored height
+   waits for the board), a topic's head stays put over its body's
+   scroller (.gal-pbody, cards.js wrapTopic), so nothing sticks over what
+   a deep link scrolls to. A page is a split tree: a split (.gal-split,
+   row or col) holds its two children and a 6px divider (.gal-div, a
+   focusable separator) between them; a drag over a docked pane previews
+   its drop zone (.gal-overlay over the viewport: the zone's half of the
+   pane, or all of it for the center). A drag held over a rail dot
+   springs its page into view (.spring, cards.js). Past a pane's scroll
+   limit the wheel pulls (cards.js gate): the page shown, or the narrow
+   Main Board, shifts by its translate property (apart from the slides'
+   transform) while data-gal-pull is set, a pill (.gal-pullpill) at that
+   edge of the viewport reads the target and its percentage, and the
+   target's dot carries .pull-target. */
 :root { --pbw: calc(1680px - 32px - 356px); }
-.dbody:has(> .dgrid.live) { --cvw: var(--convow, calc(var(--boardw) * 5 / 7)); }
+.dash { --stagew: var(--pbw); }
 .dash.board { --pbw: 900px; }
-.bpcol { display: none; }
-/* An empty board (no topic or card in it; the placeholder may follow an empty #bpins or a future toolbar card) is a quiet dashed placeholder, as the idle pin zone (.bpzone) is. In the live page it fills its column (.bcol), a scroll box with its own offsets (padding, the .top-classed pill wrapper's margin, the rail wrappers' margins), so it is pinned to the column's padding box rather than sized by height: 100%, which overflowed by those offsets. Elsewhere (no sized column) it stays a short strip. */
-.r-board:not(:has(> .topic, > .bcard)) > .empty { box-sizing: border-box; min-height: 54px; margin: 0; display: grid; place-items: center; border: 2px dashed color-mix(in srgb, var(--wb-muted-fg) 40%, transparent); font-weight: 700; }
-.dgrid.live > .bcol:has(> .r-board > .empty) { position: relative; }
-.dgrid.live > .bcol > .r-board:not(:has(> .topic, > .bcard)):has(> .empty) { position: absolute; inset: 0 4px 0 2px; display: flex; flex-direction: column; }
-.dgrid.live > .bcol > .r-board:not(:has(> .topic, > .bcard)) > .empty { flex: 1 1 0; }
-.bpins:empty { display: none; }
-.r-board > .bpins { margin-bottom: 16px; padding-bottom: 6px; border-bottom: 1px dashed var(--wb-line); }
-.r-board > .bpins::before { content: attr(data-label); display: block; padding: 0 2px 6px; font-size: 11px; font-weight: 800; color: var(--wb-muted-fg); }
-.bpcol > .bpins { flex: 1 1 0; min-height: 0; overflow: auto; overflow-anchor: none; padding: 10px 4px 40px 2px; }
-/* The pinned column has no rail (cards.js), so its topics' bars and cards' headers stick to the top of this scroller by CSS alone, as the board's do. The pin list above the board sits in the rail's host (.wb-rail) and is railed with the board. */
-.bpcol > .bpins .topic { overflow: hidden; overflow: clip; }
-.bpcol > .bpins .topic > .tophead { position: sticky; top: 0; z-index: 2; }
-.bpcol > .bpins .topic:not(.quiet) > .tophead > .tbar { border-radius: var(--wb-radius) var(--wb-radius) 0 0; }
-.bpcol > .bpins .bcard:not([data-max]) .bc-hd { position: sticky; top: 0; z-index: 1; background: var(--wb-card); border-radius: var(--wb-radius) var(--wb-radius) 0 0; }
+.dash:has(> .dwrap .dgrid:is(.live, .history)) { --cvw: var(--convow, calc(var(--boardw) * 5 / 7)); }
+:root[data-boardw] .dash.board { --stagew: var(--boardw); }
+:root[data-boardw] .dash:has(> .dwrap .dgrid:is(.live, .history)) { --stagew: calc(var(--cvw) + 16px + var(--boardw)); }
+.bgal { display: none; }
+:root[data-gal] .bgal:not([hidden]) { display: flex; gap: 6px; min-width: 0; min-height: 0; }
+.bgal > .bp-edge { display: none; }
+.gal-rail { flex: none; width: 34px; display: flex; flex-direction: column; align-items: center; border-radius: var(--wb-radius); background: color-mix(in srgb, var(--wb-bg) 70%, var(--wb-card)); box-shadow: var(--wb-shadow); cursor: ns-resize; touch-action: none; -webkit-user-select: none; user-select: none; }
+.gal-rail[hidden] { display: none; }
+.gal-rzone { flex: 1 1 0; width: 100%; display: flex; align-items: center; justify-content: center; color: var(--wb-muted-fg); font-size: 10px; opacity: .5; cursor: pointer; transition: background .12s, opacity .12s; }
+.gal-rzone:hover { background: color-mix(in srgb, var(--wb-fg) 6%, transparent); opacity: 1; color: var(--wb-primary); }
+.gal-dots { flex: 0 1 auto; min-height: 0; width: 100%; display: flex; flex-direction: column; align-items: center; gap: 7px; padding: 8px 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; }
+.gal-dots::-webkit-scrollbar { display: none; }
+.gal-dot { box-sizing: border-box; width: 22px; height: 22px; padding: 0; border-radius: 999px; border: 1.5px solid var(--wb-muted-fg); background: var(--wb-card); color: var(--wb-muted-fg); font: 700 10px var(--wb-mono); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: transform .12s, background .12s, border-color .12s, height .14s; }
+.gal-dot:hover, .gal-dot:focus-visible { border-color: var(--wb-primary); color: var(--wb-fg); transform: scale(1.08); }
+.gal-dot.active { height: 28px; border-color: var(--wb-primary); background: var(--wb-primary); color: var(--wb-card); box-shadow: 0 0 0 3px color-mix(in srgb, var(--wb-primary) 24%, transparent); }
+.gal-dot.page { width: 28px; height: auto; min-height: 28px; padding: 4px 2px; border-radius: 14px; flex-direction: column; gap: 2px; color: var(--wb-muted-fg); }
+.gal-dot.page.active { height: auto; background: color-mix(in srgb, var(--wb-primary) 15%, var(--wb-card)); color: var(--wb-fg); border-color: var(--wb-primary); box-shadow: 0 0 0 2px color-mix(in srgb, var(--wb-primary) 32%, transparent); }
+.gal-dot-icon { display: block; flex: none; width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.gal-dot-icon.d-gal-impl { color: light-dark(#2457c5, #8db8ff); }
+.gal-dot-icon.d-gal-research { color: light-dark(#7544ac, #c6a5f7); }
+.gal-dot-icon.d-gal-discuss { color: light-dark(#a64f08, #ffb36b); }
+.gal-dot-icon.d-gal-confirm { color: light-dark(#1d7348, #7fd6a8); }
+.gal-dot-icon.d-gal-wait { color: light-dark(#596172, #b9bdc6); }
+.gal-dot-more { display: block; color: var(--wb-fg); font: 700 9px/12px var(--wb-mono); white-space: nowrap; }
+.gal-dot.main { margin-bottom: 8px; border-color: #3fa853; color: #3fa853; font-size: 11px; }
+.gal-dot.main.active { background: #3fa853; color: #0b1910; box-shadow: 0 0 0 3px rgb(63 168 83 / .24); }
+.gal-dot.empty { border-style: dashed; background: transparent; font-size: 13px; font-weight: 500; }
+.gal-dot.empty.active { height: 24px; border-style: solid; border-color: var(--wb-primary); background: color-mix(in srgb, var(--wb-primary) 16%, transparent); color: var(--wb-primary); }
+.gal-dot.drop, .gal-dot.spring, .gal-dot.pull-target { outline: 2px solid #e0a84a; outline-offset: 2px; transform: scale(1.16); box-shadow: 0 0 0 5px rgb(224 168 74 / .24); }
+.bgal[data-dotdrag] .gal-rail { cursor: grabbing; }
+.gal-viewport { flex: 1 1 0; min-width: 0; min-height: 0; position: relative; overflow: hidden; overflow: clip; }
+.gal-page { position: absolute; inset: 0; display: flex; min-width: 0; min-height: 0; transform: translateY(calc(var(--gal-off, 0) * (100% + 24px))); }
+.gal-page[data-active] { transform: none; transition: transform .22s cubic-bezier(.22, 1, .36, 1), translate .22s cubic-bezier(.22, 1, .36, 1); }
+.r-board { transition: translate .22s cubic-bezier(.22, 1, .36, 1); }
+.gal-page[data-gal-pull], .r-board[data-gal-pull] { transition: translate .06s linear; }
+@media (prefers-reduced-motion: reduce) { .gal-page[data-active], .r-board { transition: none; } }
+.gal-pullpill { position: absolute; left: 50%; z-index: 6; box-sizing: border-box; min-width: 220px; max-width: calc(100% - 20px); padding: 5px 10px 6px; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--wb-primary) 55%, var(--wb-line)); background: color-mix(in srgb, var(--wb-card) 94%, black); box-shadow: 0 6px 20px rgb(0 0 0 / .45); display: flex; flex-direction: column; gap: 4px; pointer-events: none; opacity: 0; transform: translateX(-50%) scale(.94); transition: opacity .14s ease, transform .14s ease; }
+.gal-pullpill.top { top: 8px; }
+.gal-pullpill.bottom { bottom: 8px; }
+.gal-pullpill.lit { opacity: 1; transform: translateX(-50%) scale(1); }
+.gal-pullpill.damped { border-color: var(--wb-line); }
+.gal-pulltxt { font-size: 11px; font-weight: 600; color: var(--wb-fg); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gal-pulltrack { height: 3px; border-radius: 999px; background: var(--wb-muted); overflow: hidden; }
+.gal-pullfill { height: 100%; width: 0%; border-radius: 999px; background: var(--wb-primary); transition: width .06s linear; }
+.gal-pullpill.ready .gal-pullfill { background: #5cc46a; }
+.gal-split { flex: 1 1 0px; min-width: 0; min-height: 0; display: flex; }
+.gal-split.row { flex-direction: row; }
+.gal-split.col { flex-direction: column; }
+.gal-div { flex: none; position: relative; touch-action: none; -webkit-user-select: none; user-select: none; outline: none; }
+.gal-split.row > .gal-div { width: 6px; cursor: col-resize; }
+.gal-split.col > .gal-div { height: 6px; cursor: row-resize; }
+.gal-div::after { content: ""; position: absolute; border-radius: 999px; background: transparent; transition: background .12s; }
+.gal-split.row > .gal-div::after { left: 2px; right: 2px; top: 4px; bottom: 4px; }
+.gal-split.col > .gal-div::after { top: 2px; bottom: 2px; left: 4px; right: 4px; }
+.gal-div:hover::after, .gal-div:focus-visible::after, .gal-div.drag::after { background: var(--wb-primary); }
+.gal-overlay { position: absolute; z-index: 5; box-sizing: border-box; pointer-events: none; background: color-mix(in srgb, var(--wb-primary) 24%, transparent); border: 2px solid var(--wb-primary); border-radius: 6px; }
+.gal-overlay[hidden] { display: none; }
+.gal-pane { flex: 1 1 0px; min-width: 0; min-height: 0; display: flex; flex-direction: column; position: relative; }
+.gal-pane > section.topic, .gal-pane > .bcard { flex: 1 1 auto; min-height: 0; margin: 0; display: flex; flex-direction: column; }
+.gal-pane > section.topic { overflow: hidden; overflow: clip; }
+.gal-pane > section.topic > .tophead { flex: none; position: static; }
+.gal-pane > section.topic:not(.quiet) > .tophead > .tbar { border-radius: var(--wb-radius) var(--wb-radius) 0 0; }
+.gal-pbody { flex: 1 1 auto; min-height: 0; overflow: auto; overflow-anchor: none; overscroll-behavior: contain; }
+/* The board's visible-only rendering never skips a docked body: the
+   gallery keeps its pages rendered and off the view by transform alone. */
+.gal-pane > section.topic > .gal-pbody { content-visibility: visible !important; }
+.gal-pane > .bcard > .bc-in { flex: 1 1 auto; min-height: 0; }
+.gal-pane > .bcard > .bc-in > .bc-hd { flex: none; }
+.gal-pane > .bcard:not([data-max]) > .bc-in > .bc-body { flex: 1 1 auto; height: auto !important; }
+.gal-pane > .bcard > .bc-in > .bc-grip { display: none; }
+.gal-plus { box-sizing: border-box; align-items: center; justify-content: center; padding: 16px; border: 2px dashed color-mix(in srgb, var(--wb-muted-fg) 40%, transparent); border-radius: var(--wb-radius); background: color-mix(in srgb, var(--wb-bg) 94%, transparent); color: var(--wb-muted-fg); font-weight: 700; font-size: 13px; text-align: center; -webkit-user-select: none; user-select: none; transition: border-color .15s, color .15s, background-color .15s; }
+:root[data-gal="empty"]:not([data-bdrag]) .gal-plus { border-color: color-mix(in srgb, var(--wb-muted-fg) 26%, transparent); color: color-mix(in srgb, var(--wb-muted-fg) 72%, transparent); background: transparent; }
+:root[data-bdrag] .gal-plus, .gal-plus.drop { border-color: var(--wb-primary); color: var(--wb-primary); background: color-mix(in srgb, var(--wb-primary) 8%, var(--wb-bg)); }
+.gal-plus.drop { background: color-mix(in srgb, var(--wb-primary) 18%, var(--wb-bg)); }
+/* the narrow view: over the board's column, Page 0 the board itself */
+:root[data-gal="narrow"] .bgal:not([hidden]) { position: fixed; z-index: 35; left: var(--gal-left, 0px); top: var(--gal-top, 0px); width: var(--gal-width, 100vw); height: var(--gal-height, 100vh); pointer-events: none; }
+:root[data-gal="narrow"] .bgal[data-away] { transform: translateX(-200vw); }
+:root[data-gal="narrow"] .bgal > .gal-rail, :root[data-gal="narrow"] .bgal:not([data-pos="-1"]) > .gal-viewport { pointer-events: auto; }
+:root[data-gal="narrow"] .bgal:not([data-pos="-1"]) > .gal-viewport { background: var(--wb-bg); }
+:root[data-gal="narrow"] .dgrid > .bcol { padding-left: 42px; }
+/* While a docked page shows over it (data-gal-away, cards.js), the Main
+   Board stands off the view as an inactive page does: its column's content
+   is translated past the window's left edge, out of the column's clip (a
+   scroller already clips; the board-first page's column clips for this),
+   so intersection observers count it out of view. Only the content moves:
+   the column keeps its box (placeGallery measures it), its scroll offset
+   and its DOM. */
+:root[data-gal-away] .dgrid > .bcol > * { transform: translateX(calc(-100% - 100vw)); }
+:root[data-gal-away] .dgrid.board > .bcol { overflow-x: clip; }
+/* the wide view with no docked page, while a drag runs: over the right edge */
+:root[data-gal="drag"] .bgal:not([hidden]) { position: fixed; z-index: 40; top: 50px; bottom: 12px; right: 16px; width: clamp(360px, calc(100vw - 1696px), 520px); }
 .bp-edge { position: absolute; top: 0; bottom: 0; left: -12px; width: 9px; cursor: col-resize; touch-action: none; z-index: 2; }
 .bp-edge::after, .dcv-edge::after { content: ""; position: absolute; top: 50%; left: 3px; width: 3px; height: 36px; margin-top: -18px; border-radius: 2px; background: var(--wb-muted); transition: background .15s; }
 .bp-edge:hover::after, .bp-edge.drag::after, .dcv-edge:hover::after, .dcv-edge.drag::after { background: var(--wb-primary); }
 @media (min-width: 1600px) {
-  :root[data-pincol] .bpcol { display: flex; flex-direction: column; position: relative; min-height: 0; min-width: 0; grid-row: 1; grid-column: 2; }
-  :root[data-pincol] .dbody { grid-template-columns: minmax(0, min(var(--boardw, min(var(--pbw), 100% - 496px)), 100% - 296px)) minmax(280px, 1fr); }
-  :root[data-pincol][data-boardw] .dbody:has(> .dgrid.live) { grid-template-columns: minmax(0, min(var(--cvw) + 16px + var(--boardw), 100% - 296px)) minmax(280px, 1fr); }
-  :root[data-pincol] .dbody > .dgrid, :root[data-pincol] .dbody > .tk-spage { grid-column: 1; grid-row: 1; }
-  .dash:not(.live):not(.history) .bpcol { position: sticky; top: 12px; max-height: calc(100vh - 24px); max-height: calc(100dvh - 24px); }
-  :root[data-pincol] .dwrap:not(.narrow), :root[data-pincol] .dgrid.board { max-width: none; }
+  /* Band 4 (dynamic four-column dock): rail, stage, and gallery column all show */
+  :root:is([data-gal="col"], [data-gal="empty"], [data-gal="drag"]) .dwrap:not(.narrow),
+  :root:is([data-gal="col"], [data-gal="empty"], [data-gal="drag"]) .dgrid.board { max-width: none; margin: 0; }
+  :root:is([data-gal="col"], [data-gal="empty"], [data-gal="drag"]) .dbody { grid-template-columns: 340px minmax(0, min(var(--boardw, min(var(--pbw), 100% - 852px)), 100% - 652px)) minmax(280px, 1fr); }
+  :root[data-pincol][data-boardw]:is([data-gal="col"], [data-gal="empty"], [data-gal="drag"]) .dbody:has(> .dgrid:is(.live, .history)) { grid-template-columns: 340px minmax(0, min(var(--cvw) + 16px + var(--boardw), 100% - 652px)) minmax(280px, 1fr); }
+  :root:is([data-gal="col"], [data-gal="empty"], [data-gal="drag"]) .dbody > .rail { grid-column: 1; grid-row: 1; }
+  :root:is([data-gal="col"], [data-gal="empty"], [data-gal="drag"]) .dbody > .dgrid,
+  :root:is([data-gal="col"], [data-gal="empty"], [data-gal="drag"]) .dbody > .tk-spage { grid-column: 2; grid-row: 1; }
+  :root:is([data-gal="col"], [data-gal="empty"], [data-gal="drag"]) .bgal:not([hidden]) { position: relative; z-index: auto; top: auto; bottom: auto; right: auto; width: auto; grid-column: 3; grid-row: 1; }
+  :root:is([data-gal="col"], [data-gal="empty"], [data-gal="drag"]) .dash:not(.live):not(.history) .bgal:not([hidden]) { position: sticky; top: 12px; height: calc(100vh - 24px); height: calc(100dvh - 24px); }
+  :root[data-pincol] .bgal > .bp-edge { display: block; }
 }
-@media (min-width: 1600px) and (max-width: 2199.98px) {
-  /* the column takes the rail's place, and the rail overlays */
-  :root[data-pincol] .rail { position: fixed; z-index: 45; top: 12px; bottom: 12px; left: 12px; width: 340px; max-width: calc(100vw - 24px); max-height: none; box-shadow: var(--wb-shadow-hi); transform: translateX(calc(-100% - 20px)); visibility: hidden; transition: transform .22s cubic-bezier(.2, .7, .3, 1), visibility 0s linear .22s; }
-  :root[data-pincol].rail-open .rail { transform: none; visibility: visible; transition: transform .22s cubic-bezier(.2, .7, .3, 1); }
-  :root[data-pincol] .rscrim { display: block; position: fixed; inset: 0; z-index: 44; background: var(--scrim); opacity: 0; pointer-events: none; transition: opacity .22s; }
-  :root[data-pincol].rail-open .rscrim { opacity: 1; pointer-events: auto; }
-  :root[data-pincol] .rail .rkids { margin-left: 10px; }
-  :root[data-pincol] .dwrap > .top > .back { display: inline-flex; }
-  :root[data-pincol] .dwrap > .top { margin-left: 0; }
-  :root[data-pincol] .dbody > .rail { margin: 0; }
-}
-@media (min-width: 2200px) {
-  /* rail and column both show */
-  :root[data-pincol] .dbody { grid-template-columns: 340px minmax(0, min(var(--boardw, min(var(--pbw), 100% - 852px)), 100% - 652px)) minmax(280px, 1fr); }
-  :root[data-pincol][data-boardw] .dbody:has(> .dgrid.live) { grid-template-columns: 340px minmax(0, min(var(--cvw) + 16px + var(--boardw), 100% - 652px)) minmax(280px, 1fr); }
-  :root[data-pincol] .dbody > .rail { grid-column: 1; grid-row: 1; }
-  :root[data-pincol] .dbody > .dgrid, :root[data-pincol] .dbody > .tk-spage { grid-column: 2; }
-  :root[data-pincol] .bpcol { grid-column: 3; }
-  :root[data-pincol] body:not(.tk-paged) .bpcol > .bpins:empty { display: grid; place-items: center; padding: 12px; border: 2px dashed color-mix(in srgb, var(--wb-muted-fg) 40%, transparent); border-radius: var(--wb-radius); color: var(--wb-muted-fg); font-weight: 700; font-size: 13px; text-align: center; }
-  :root[data-pincol] .bpcol > .bpins:empty::before { content: attr(data-drop); }
-  :root[data-pincol][data-bdrag] body:not(.tk-paged) .bpcol > .bpins:empty { border-color: var(--wb-primary); background: color-mix(in srgb, var(--wb-primary) 8%, var(--wb-bg)); color: var(--wb-primary); font-weight: 800; }
-}
+/* An empty board (no topic or card in it; the placeholder may follow a future toolbar card) is a quiet dashed placeholder. In the live page it fills its column (.bcol), a scroll box with its own offsets (padding, the .top-classed pill wrapper's margin, the rail wrappers' margins), so it is pinned to the column's padding box rather than sized by height: 100%, which overflowed by those offsets. Elsewhere (no sized column) it stays a short strip. */
+.r-board:not(:has(> .topic, > .bcard)) > .empty { box-sizing: border-box; min-height: 54px; margin: 0; display: grid; place-items: center; border: 2px dashed color-mix(in srgb, var(--wb-muted-fg) 40%, transparent); font-weight: 700; }
+.dgrid.live > .bcol:has(> .r-board > .empty) { position: relative; }
+.dgrid.live > .bcol > .r-board:not(:has(> .topic, > .bcard)):has(> .empty) { position: absolute; inset: 0 4px 0 2px; display: flex; flex-direction: column; }
+.dgrid.live > .bcol > .r-board:not(:has(> .topic, > .bcard)) > .empty { flex: 1 1 0; }
 /* the pin button in a topic's title bar, and dragging a topic or card by
-   its header: the dragged one dims, a line shows where it lands, and the
-   drop zones show while a drag runs (data-bdrag on the root): the empty
-   pin group atop the board ("group"), or the zone along the right edge
-   where a first pin opens the pinned column ("edge"). The zone fills the
-   strip right of the left-aligned page (1680px wide at most while nothing
-   is pinned), and at least 48px, so it leaves the board column to its own
-   reorder drops; where the strip is narrow its label runs vertically.
-   From 1780px, where the strip is wide, the zone stands there idle while
-   nothing is pinned and the column could show (not the "tabs" layout, not
-   a store page): a quiet placeholder for the column, lit when a drag runs.
-   From 2200px the column itself shows instead (data-pincol), so the zone
-   stays hidden there. */
+   its header: the dragged one dims, a line shows where it lands in the
+   board's flow, and the gallery's rail shows (data-bdrag on the root)
+   with the drop target under the pointer lit (.drop: a rail dot, the +
+   page, a docked page). */
 .tbar .tpin { color: inherit; opacity: .45; }
 .tbar:hover .tpin, .tbar .tpin:focus-visible { opacity: .9; }
 .tbar .tpin[aria-pressed="true"] { opacity: 1; color: var(--wb-primary); }
 .tbar .tpin[aria-pressed="true"] .li, .bc-pin[aria-pressed="true"] .li { fill: color-mix(in srgb, var(--wb-primary) 25%, transparent); }
-.r-board section.topic > .tophead > .tbar, .bpins section.topic > .tophead > .tbar, .bc-hd { cursor: grab; }
+.r-board section.topic > .tophead > .tbar, .bgal section.topic > .tophead > .tbar, .bc-hd { cursor: grab; }
 :root[data-bdrag], :root[data-bdrag] * { cursor: grabbing !important; -webkit-user-select: none; user-select: none; }
 .bdrag { opacity: .4; }
 .bdrop { position: fixed; z-index: 46; height: 3px; border-radius: 2px; background: var(--wb-primary); pointer-events: none; }
 .bdrop[hidden] { display: none; }
-:root[data-bdrag="group"] .r-board > .bpins:empty { display: block; position: sticky; top: var(--wb-rail-inset, 0px); z-index: 5; min-height: 54px; padding: 0; border: 1.5px dashed var(--wb-primary); border-radius: var(--wb-radius); background: color-mix(in srgb, var(--wb-primary) 6%, var(--wb-bg)); }
-:root[data-bdrag="group"] .r-board > .bpins:empty::before { content: attr(data-drop); padding: 18px 12px; text-align: center; color: var(--wb-primary); }
-.bpzone { position: fixed; z-index: 40; top: 50px; bottom: 12px; right: 16px; width: max(48px, calc(100vw - 1696px)); display: none; place-items: center; padding: 12px; border: 2px dashed var(--wb-primary); border-radius: var(--wb-radius); background: color-mix(in srgb, var(--wb-primary) 8%, var(--wb-bg)); color: var(--wb-primary); font-weight: 800; font-size: 13px; text-align: center; pointer-events: none; }
-:root[data-bdrag="edge"] .bpzone { display: grid; }
-.bpzone.over { background: color-mix(in srgb, var(--wb-primary) 18%, var(--wb-bg)); }
-@media (max-width: 1779.98px) { .bpzone { writing-mode: vertical-rl; padding: 12px 4px; } }
-@media (min-width: 1780px) {
-  :root:not([data-pincol]):not([data-bdrag]) body:not(.tk-paged):not([data-dashboard-layout="tabs"]) .bpzone { display: grid; z-index: 1; border-color: color-mix(in srgb, var(--wb-muted-fg) 40%, transparent); background: transparent; color: var(--wb-muted-fg); font-weight: 700; }
-}
 .rail .rhd { flex: none; display: flex; align-items: center; gap: 6px; padding: 8px 8px 8px 12px; font-size: 12px; font-weight: 800; color: var(--wb-muted-fg); }
 .rail .rsp { flex: 1; }
 .rail .chip { height: 18px; font-size: 11px; padding: 0 7px; flex: none; }
@@ -152,7 +226,7 @@
 .rail .rref:disabled { cursor: default; color: var(--wb-muted-fg); background: transparent; }
 .rail .rref:disabled > .i { opacity: .4; }
 html:not([data-sysopen]) .rail .rsleep { display: none; }
-.rail .rlist { flex: 1 1 auto; min-height: 0; overflow: auto; padding-bottom: 6px; }
+.rail .rlist { flex: 1 1 auto; min-height: 0; overflow: auto; padding-bottom: 6px; display: flex; flex-direction: column; }
 .rail .rlist > .empty { padding: 10px 12px; font-size: 12.5px; color: var(--wb-muted-fg); }
 .rail .rws + .rws { margin-top: 8px; }
 .rail .wsbar { display: flex; align-items: center; gap: 8px; padding: 3px 12px; min-height: 28px; background: var(--wb-topic); color: var(--wb-on-topic); cursor: pointer; user-select: none; }
@@ -359,17 +433,17 @@ html:not([data-sysopen]) .rail .rsleep { display: none; }
 .rail .qdot { position: absolute; z-index: 2; top: -3px; left: -3px; width: 7px; height: 7px; border-radius: 50%; background: var(--wb-accent-policy); box-shadow: 0 0 0 1.5px var(--wb-card); }
 .rail .rs:hover .qdot { box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--wb-primary) 6%, var(--wb-card)); }
 .rail .rs.cur .qdot { box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--wb-primary) 12%, var(--wb-card)); }
-/* One-shot attention (mockup B): three flashes, then tint + icon ring.
+/* One-shot attention (mockup B): three flashes, then tint + badge ring.
    The question dot's z-index keeps it above both overlays. Only the node
    first flagged gets .attn-flash; server replacements are settled. */
 .rail .rs.attn::before { content: ""; position: absolute; inset: 0; border-radius: 6px; pointer-events: none; background: var(--wb-accent-policy); opacity: .12; }
-.rail .rs.attn .hiw::after { content: ""; position: absolute; inset: 0; border-radius: 6px; pointer-events: none; box-shadow: 0 0 0 2px color-mix(in srgb, var(--wb-accent-policy) 45%, transparent); }
+.rail .rs.attn .hb::after { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; box-shadow: 0 0 0 2px color-mix(in srgb, var(--wb-accent-policy) 45%, transparent); }
 .rail .rs.attn.attn-flash::before { animation: attn-flash .6s ease-in-out 3; }
-.rail .rs.attn.attn-flash .hiw::after { animation: attn-flash-ring .6s ease-in-out 3; }
+.rail .rs.attn.attn-flash .hb::after { animation: attn-flash-ring .6s ease-in-out 3; }
 @keyframes attn-flash { 0% { opacity: 0; } 50% { opacity: .38; } 100% { opacity: .12; } }
 @keyframes attn-flash-ring { 0% { box-shadow: 0 0 0 0 transparent; } 50% { box-shadow: 0 0 0 4px var(--wb-accent-policy); } 100% { box-shadow: 0 0 0 2px color-mix(in srgb, var(--wb-accent-policy) 45%, transparent); } }
 @media (prefers-reduced-motion: reduce) {
-  .rail .rs.attn::before, .rail .rs.attn .hiw::after { animation: none !important; }
+  .rail .rs.attn::before, .rail .rs.attn .hb::after { animation: none !important; }
 }
 @keyframes rail-nudge { 0%, 56%, 100% { transform: none; } 10% { transform: translateY(-3px) rotate(-10deg); } 22% { transform: translateY(0) rotate(10deg); } 34% { transform: translateY(-2px) rotate(-8deg); } 46% { transform: translateY(0) rotate(6deg); } }
 @keyframes rail-blink { 50% { opacity: .25; } }
@@ -407,11 +481,12 @@ html:not([data-sysopen]) .rail .rsleep { display: none; }
 .shp-last { font-size: 10.5px; color: var(--wb-muted-fg); font-family: var(--wb-sans); overflow-wrap: anywhere; }
 .shp.stale .shp-mid, .shp.stale .shp-eff { opacity: .72; }
 /* r-ctx renders the existing status-band markup directly into the popup. */
-.shp .sb-top { padding: 0; }
+.shp .sb-top { padding: 4px 0 0; }
 .shp .sb-ctx { gap: 7px; min-width: 0; }
 .shp .sb-pct { font-size: 15px; }
 .shp .sb-bar { height: 8px; min-width: 60px; }
 .shp .sb-tok { font-size: 11px; }
+.shp .sb-native, .shp .ctx-tip { display: none; }
 .shp.stale .sb-ctx { --c: var(--wb-muted-fg); }
 .shp-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
 .shp-stat { min-width: 0; display: grid; gap: 1px; padding: 5px 8px 6px; border-radius: 8px; box-shadow: inset 0 0 0 1px var(--wb-line); }
@@ -420,8 +495,13 @@ html:not([data-sysopen]) .rail .rsleep { display: none; }
 .shp-stat b.tps { color: var(--wb-primary); }
 .shp-stat b.na { color: var(--wb-muted-fg); font-weight: 500; }
 .shp-stat > span { font-size: 10.5px; line-height: 1.25; color: var(--wb-muted-fg); white-space: normal; overflow-wrap: anywhere; }
-.modelhistory { margin: 8px 12px; font-size: 12px; color: var(--wb-muted-fg); }
-.modelhistory > summary { cursor: pointer; }
+.modelhistory-trigger { width: 24px; padding: 0; justify-content: center; border: 0; font: inherit; cursor: pointer; }
+.modelhistory-trigger:hover, .modelhistory-trigger[aria-expanded="true"] { color: var(--wb-fg); background: color-mix(in srgb, var(--wb-primary) 12%, var(--wb-card)); }
+.modelhistory-trigger:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: 1px; }
+.modelhistory-popover { width: 360px; }
+.modelhistory { display: grid; gap: 9px; font-size: 12px; color: var(--wb-muted-fg); }
+.modelhistory-agent { display: grid; gap: 3px; min-width: 0; }
+.modelhistory-label { color: var(--wb-fg); font-weight: 700; overflow-wrap: anywhere; }
 /* Observed-model rows carry no leading .mk marker, so drop .brow's 16px marker column here. */
 .modelhistory .brow { grid-template-columns: minmax(0, 1fr) auto; }
 .shp-foot { display: flex; flex-wrap: wrap; gap: 2px 0; font-size: 11.5px; color: var(--wb-muted-fg); font-variant-numeric: tabular-nums; }
@@ -652,6 +732,57 @@ html:not([data-sysopen]) .rail .drarch { display: none; }
 .bgbadge[hidden] { display: none; }
 .bgbadge .i { width: 13px; height: 13px; flex: none; }
 .rpop .spact[hidden] { display: none; }
+/* common permission level (dashboard-leads.js permSeg / permState /
+   permFullAsk / permChip): the level segment spans the popover; a level
+   derived from older settings is dashed and tagged, not checked */
+.rpop .pmseg { width: 100%; box-sizing: border-box; display: flex; flex-wrap: nowrap; }
+.rpop .pmseg button { flex: 1 1 auto; padding: 3px 6px; white-space: nowrap; font-size: 11.5px; }
+.rpop .pmseg button.derived { outline: 1.5px dashed color-mix(in srgb, var(--wb-muted-fg) 70%, transparent); outline-offset: -2px; }
+.rpop .pmseg button.full[aria-checked="true"] { color: var(--wb-fail); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-fail) 50%, transparent); }
+.pmtag { margin-left: 4px; font-size: 9.5px; font-weight: 700; padding: 0 4px; border-radius: 4px; background: var(--wb-card); color: var(--wb-muted-fg); vertical-align: 1px; }
+/* the native mode, kept editable behind a disclosure */
+.rpop .pmadv { display: grid; gap: 3px; min-width: 0; }
+.rpop .pmadv > summary { display: flex; align-items: center; gap: 5px; cursor: pointer; list-style: none; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--wb-muted-fg); }
+.rpop .pmadv > summary::-webkit-details-marker { display: none; }
+.rpop .pmadv > summary::before { content: "\25b8"; font-size: 10px; transition: transform .12s; }
+.rpop .pmadv[open] > summary::before { transform: rotate(90deg); }
+.rpop .pmadv > summary:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: 1px; border-radius: 3px; }
+.rpop .pmadv .pmown { font-size: 10.5px; font-weight: 700; padding: 0 6px; border-radius: 999px; background: var(--wb-muted); color: var(--wb-fg); text-transform: none; letter-spacing: 0; }
+/* what the picked level asks for, then how this harness carries it */
+.rpop .pmwhat { margin: 2px 0 0; font-size: 11.5px; color: var(--wb-fg); }
+.rpop .pmmap { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 6px; margin: 0; font-size: 11.5px; color: var(--wb-muted-fg); }
+.rpop .pmmap code, .pmstate code, .rdeldlg .pmc, .chip.pmhead code { font-family: var(--wb-mono); font-size: 11px; color: var(--wb-fg); background: var(--wb-muted); padding: 0 5px; border-radius: 4px; }
+.rpop .pmfine { margin: 0; font-size: 11px; color: var(--wb-muted-fg); }
+/* evidence quality pills; there is deliberately no "enforced" style */
+.pmq { display: inline-flex; align-items: center; font-size: 10.5px; font-weight: 700; padding: 0 7px; border-radius: 999px; line-height: 17px; white-space: nowrap; }
+.pmq.partial { color: var(--wb-primary); background: color-mix(in srgb, var(--wb-primary) 13%, var(--wb-card)); }
+.pmq.advisory { color: color-mix(in srgb, var(--wb-warn-ink) 80%, var(--wb-fg)); background: color-mix(in srgb, var(--wb-warn) 16%, var(--wb-card)); }
+.pmq.pending { color: var(--wb-muted-fg); background: var(--wb-muted); }
+.pmq.mismatch { color: var(--wb-fail); background: color-mix(in srgb, var(--wb-fail) 12%, var(--wb-card)); }
+/* a session's permission state: intent, native mode and evidence, apart */
+.rpop .pmstate { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 10px; align-items: baseline; padding: 8px 10px; border-radius: 8px; box-shadow: inset 0 0 0 1px var(--wb-line); }
+.pmstate .pmk { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--wb-muted-fg); white-space: nowrap; }
+.pmstate .pmv { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 6px; min-width: 0; }
+.pmstate .pmv b { font-weight: 700; }
+.pmstate .pmsrc { font-size: 11px; color: var(--wb-muted-fg); }
+.pmstate .pmnote { grid-column: 1 / -1; margin: 0; font-size: 11.5px; color: var(--wb-muted-fg); }
+.rpop .pmchg { display: grid; gap: 5px; }
+/* unsupported and refused */
+.rpop .pmoff { margin: 0; padding: 6px 9px; border-radius: 8px; background: var(--wb-muted); font-size: 11.5px; color: var(--wb-muted-fg); }
+.rpop .pmerr { margin: 0; padding: 7px 10px; border-radius: 8px; background: color-mix(in srgb, var(--wb-fail) 12%, var(--wb-card)); color: var(--wb-fail); font-size: 11.5px; display: grid; gap: 2px; }
+.rpop .pmerr span { color: color-mix(in srgb, var(--wb-fail) 70%, var(--wb-fg)); }
+/* the full-permission warning: the delete dialog's frame and parts */
+.rdeldlg .rdhd .i.pmlock { color: var(--wb-fail); }
+.rdeldlg .pmack { display: flex; gap: 8px; align-items: flex-start; padding: 8px 10px; border-radius: 8px; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-fail) 45%, transparent); cursor: pointer; font-weight: 600; }
+.rdeldlg .pmack input { margin: 2px 0 0; accent-color: var(--wb-fail); flex: none; }
+/* the head chip beside the harness chip */
+.chip.pmhead { display: inline-flex; align-items: center; gap: 4px; height: 20px; box-sizing: border-box; margin-left: 6px; padding: 0 7px; border-radius: 999px; background: var(--wb-muted); color: var(--wb-fg); font-size: 11.5px; font-weight: 700; white-space: nowrap; flex: none; }
+.chip.pmhead .i { width: 11px; height: 11px; }
+.chip.pmhead .pmq { line-height: 15px; padding: 0 5px; margin-right: -4px; }
+.chip.pmhead .pmtag { background: var(--wb-card); }
+.chip.pmhead[role="button"] { cursor: pointer; }
+.chip.pmhead[role="button"]:hover { background: color-mix(in srgb, var(--wb-primary) 16%, var(--wb-muted)); }
+.chip.pmhead:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: 1px; }
 @media (prefers-reduced-motion: reduce) {
   .rail, .rail-open .rail, .rscrim { transition: none; }
   .bgbadge { animation: none; }
@@ -661,3 +792,248 @@ html:not([data-sysopen]) .rail .drarch { display: none; }
   .rail .drkwork { animation: none; }
 }
 
+
+/* Empty Explicit Rail Guidance */
+.rail-empty-guide {
+  margin: 24px 14px 16px;
+  padding: 18px 14px;
+  border-radius: 10px;
+  border: 1px dashed color-mix(in srgb, var(--wb-muted-fg) 42%, transparent);
+  background: color-mix(in srgb, var(--wb-muted) 28%, var(--wb-card));
+  display: grid;
+  justify-items: center;
+  text-align: center;
+  gap: 8px;
+}
+.rail-empty-icon {
+  width: 34px; height: 34px; border-radius: 9px;
+  display: grid; place-items: center;
+  background: var(--wb-muted); color: var(--wb-muted-fg);
+}
+.rail-empty-icon .i { width: 17px; height: 17px; }
+.rail-empty-title { font-size: 13px; font-weight: 700; color: var(--wb-fg); }
+.rail-empty-sub { font-size: 11.5px; line-height: 1.45; color: var(--wb-muted-fg); margin: 0; }
+.rail-empty-add {
+  margin-top: 2px;
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 28px; padding: 0 12px; border: 0; border-radius: 999px;
+  background: var(--wb-primary); color: var(--wb-primary-fg);
+  font-size: 12px; font-weight: 700; cursor: pointer;
+}
+.rail-empty-add .i { width: 13px; height: 13px; stroke-width: 2.2; }
+.rail-empty-add:hover { filter: brightness(1.08); }
+.rail-empty-hint {
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--wb-line);
+  width: 100%;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--wb-muted-fg);
+}
+
+/* Rail Footer */
+.rail .rfoot { flex: none; display: flex; align-items: center; gap: 8px; padding: 7px 12px; border-top: 1px solid var(--wb-muted); font-size: 12px; background: var(--wb-card); }
+.rail .rfoot > .btn.gear { flex: 1 1 0; min-width: 0; width: auto; height: 28px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 8px; border: 1px solid var(--wb-line); border-radius: 8px; background: transparent; color: var(--wb-muted-fg); font-size: 12px; font-weight: 700; white-space: nowrap; cursor: pointer; }
+.rail .rfoot > .btn.gear::after { content: attr(aria-label); overflow: hidden; text-overflow: ellipsis; }
+.rail .rfoot > .btn.gear .i { width: 14px; height: 14px; flex: none; }
+.rail .rfoot > .btn.gear:hover { background: var(--wb-muted); color: var(--wb-fg); }
+
+/* ===== Bottom Collapsible Unregistered Workspace Admission Panel ===== */
+.rail details.rws-unreg {
+  flex: none;
+  margin-top: auto;
+  border-top: 1px solid var(--wb-line);
+  background: color-mix(in srgb, var(--wb-muted) 26%, var(--wb-card));
+}
+
+.rail details.rws-unreg > summary.unreg-sum {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 5px 10px 5px 10px;
+  cursor: pointer;
+  user-select: none;
+  color: var(--wb-muted-fg);
+  font-size: 12px;
+  font-weight: 700;
+}
+.rail details.rws-unreg > summary.unreg-sum::-webkit-details-marker { display: none; }
+.rail details.rws-unreg > summary.unreg-sum:hover { background: var(--wb-wash); color: var(--wb-fg); }
+.rail details.rws-unreg > summary.unreg-sum:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: -2px; }
+
+.rail .unreg-chev { width: 12px; height: 12px; flex: none; transition: transform .14s ease; opacity: .78; }
+.rail details.rws-unreg[open] > summary.unreg-sum .unreg-chev { transform: rotate(90deg); }
+
+.rail .unreg-dot {
+  width: 6px; height: 6px; border-radius: 50%; flex: none;
+  background: color-mix(in srgb, var(--wb-warn) 78%, var(--wb-muted-fg));
+  opacity: .85;
+}
+.rail .unreg-dot.zero { background: var(--wb-muted-fg); opacity: .38; }
+
+.rail .unreg-lbl { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; }
+.rail details.rws-unreg[open] > summary.unreg-sum .unreg-lbl { color: var(--wb-fg); }
+
+.rail .unreg-draft-pill {
+  flex: none; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 999px;
+  background: color-mix(in srgb, var(--wb-primary) 16%, var(--wb-card)); color: var(--wb-primary);
+}
+.rail .unreg-count {
+  flex: none;
+  min-width: 20px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--wb-muted);
+  color: var(--wb-muted-fg);
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.rail .unreg-body {
+  border-top: 1px solid var(--wb-line);
+  background: var(--wb-card);
+  padding-bottom: 4px;
+}
+
+.rail .unreg-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px 4px;
+  font-size: 11px;
+  color: var(--wb-muted-fg);
+}
+.rail .unreg-pend-stat { display: inline-flex; align-items: center; gap: 5px; font-weight: 700; color: var(--wb-warn-ink); }
+.rail .unreg-pend-stat .pn {
+  padding: 0 6px; border-radius: 999px;
+  background: color-mix(in srgb, var(--wb-warn) 18%, transparent);
+  font-variant-numeric: tabular-nums;
+}
+.rail .unreg-reject-all {
+  margin-left: auto;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--wb-line);
+  border-radius: 999px;
+  background: var(--wb-card);
+  color: var(--wb-fail);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.rail .unreg-reject-all:hover { background: color-mix(in srgb, var(--wb-fail) 10%, var(--wb-card)); border-color: color-mix(in srgb, var(--wb-fail) 45%, transparent); }
+.rail .unreg-reject-all[aria-pressed="true"] { background: var(--wb-fail); color: var(--wb-card); border-color: var(--wb-fail); }
+
+.rail .unreg-filter-wrap { position: relative; padding: 2px 10px 6px; }
+.rail .unreg-filter-wrap .i { position: absolute; left: 18px; top: 50%; transform: translateY(-60%); width: 12px; height: 12px; color: var(--wb-muted-fg); pointer-events: none; }
+.rail .unreg-filter {
+  width: 100%; height: 24px; padding: 0 8px 0 24px;
+  border: 1px solid var(--wb-line); border-radius: 7px;
+  background: var(--wb-muted); color: var(--wb-fg); font-size: 11.5px; outline: none;
+}
+.rail .unreg-filter:focus { border-color: var(--wb-primary); background: var(--wb-card); }
+.rail .unreg-filter::placeholder { color: var(--wb-muted-fg); }
+
+.rail .unreg-list {
+  max-height: 260px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0 4px 2px;
+}
+.rail .unreg-empty-filter { padding: 12px 10px; text-align: center; font-size: 11.5px; color: var(--wb-muted-fg); }
+
+/* Pending Root Row (mirrors .rwt.d-pend + .tg.ap / .tg.rj) */
+.rail .rwt.d-pend.unreg-row {
+  padding: 4px 6px;
+  margin: 1px 0;
+  border-radius: 7px;
+  transition: background .1s;
+}
+.rail .rwt.d-pend.unreg-row:hover { background: var(--wb-wash); }
+.rail .rwt.d-pend.unreg-row.m-ap { background: color-mix(in srgb, var(--wb-ok) 9%, var(--wb-card)); }
+.rail .rwt.d-pend.unreg-row.m-rj { background: color-mix(in srgb, var(--wb-fail) 6%, var(--wb-card)); }
+
+.rail .unreg-row-main { display: flex; align-items: flex-start; gap: 6px; min-width: 0; }
+.rail .unreg-row .tgs { display: inline-flex; gap: 3px; flex: none; margin-left: 0; margin-top: 1px; }
+.rail .unreg-row .tg { width: 20px; height: 20px; display: inline-grid; place-items: center; padding: 0; border: 1px solid var(--wb-line); border-radius: 6px; background: var(--wb-card); color: var(--wb-muted-fg); cursor: pointer; }
+.rail .unreg-row .tg .i { width: 11px; height: 11px; stroke-width: 2.1; }
+.rail .unreg-row .tg.ap:hover { color: var(--wb-ok); border-color: color-mix(in srgb, var(--wb-ok) 50%, transparent); }
+.rail .unreg-row .tg.rj:hover { color: var(--wb-fail); border-color: color-mix(in srgb, var(--wb-fail) 50%, transparent); }
+.rail .unreg-row .tg.ap[aria-pressed="true"] { color: var(--wb-card); background: var(--wb-ok); border-color: var(--wb-ok); }
+.rail .unreg-row .tg.rj[aria-pressed="true"] { color: var(--wb-card); background: var(--wb-fail); border-color: var(--wb-fail); }
+.rail .unreg-row .tg:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: 1px; }
+
+.rail .unreg-info { flex: 1 1 0; min-width: 0; display: grid; gap: 1px; }
+.rail .unreg-name { font-size: 12px; font-weight: 700; line-height: 1.3; color: var(--wb-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rail .unreg-parent { font-family: var(--wb-mono); font-size: 10px; line-height: 1.25; color: var(--wb-muted-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: .88; }
+.rail .unreg-row.m-ap .unreg-name { color: var(--wb-ok); }
+.rail .unreg-row.m-rj .unreg-name { text-decoration: line-through; text-decoration-color: var(--wb-fail); opacity: .72; }
+.rail .unreg-row.m-rj .unreg-parent { opacity: .55; }
+
+.rail .unreg-scount {
+  flex: none;
+  margin-top: 1px;
+  height: 18px;
+  padding: 0 6px;
+  border: 1px solid var(--wb-line);
+  border-radius: 999px;
+  background: var(--wb-card);
+  color: var(--wb-muted-fg);
+  font-size: 10.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  cursor: pointer;
+}
+.rail .unreg-scount:hover, .rail .unreg-scount[aria-expanded="true"] { color: var(--wb-primary); border-color: color-mix(in srgb, var(--wb-primary) 45%, transparent); background: color-mix(in srgb, var(--wb-primary) 10%, var(--wb-card)); }
+
+.rail .unreg-sessions {
+  margin: 4px 0 2px 46px;
+  padding-left: 8px;
+  border-left: 2px solid var(--wb-muted);
+  display: grid;
+  gap: 2px;
+}
+.rail .unreg-slink {
+  display: flex; align-items: center; gap: 5px;
+  padding: 3px 6px; border-radius: 5px;
+  text-decoration: none; color: inherit; font-size: 11.5px; min-width: 0;
+}
+.rail .unreg-slink:hover { background: color-mix(in srgb, var(--wb-primary) 10%, var(--wb-card)); }
+.rail .unreg-slink .unreg-stitle { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: var(--wb-primary); }
+.rail .unreg-slink .unreg-stime { flex: none; font-size: 10px; color: var(--wb-muted-fg); font-variant-numeric: tabular-nums; }
+
+/* Nested Rejected List (mirrors .rrej + .admission-undo) */
+.rail .rws-unreg .rrej { margin-top: 4px; border-top: 1px solid var(--wb-muted); padding-top: 2px; }
+.rail .rws-unreg .rrej > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 5px; padding: 4px 10px 4px 10px; font-size: 11.5px; color: var(--wb-muted-fg); user-select: none; }
+.rail .rws-unreg .rrej > summary::-webkit-details-marker { display: none; }
+.rail .rws-unreg .rrej > summary:hover { color: var(--wb-primary); }
+.rail .rws-unreg .rrej > summary > .i { width: 12px; height: 12px; color: var(--wb-fail); }
+.rail .rws-unreg .rrej .fl { white-space: nowrap; }
+.rail .rws-unreg .rrej .fl::after { content: " \25b8"; }
+.rail .rws-unreg .rrej[open] .fl::after { content: " \25be"; }
+.rail .rws-unreg .rrej .d-n { font-weight: 700; font-variant-numeric: tabular-nums; }
+.rail .rws-unreg .rrej-list { max-height: 120px; overflow-y: auto; padding: 0 6px 4px 10px; display: grid; gap: 3px; }
+.rail .rws-unreg .rrej-row { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 2px 4px; border-radius: 5px; }
+.rail .rws-unreg .rrej-row-info { flex: 1 1 0; min-width: 0; }
+.rail .rws-unreg .rrej-row-name { font-size: 11.5px; font-weight: 600; color: var(--wb-muted-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rail .rws-unreg .rrej-row-path { font-family: var(--wb-mono); font-size: 9.5px; color: var(--wb-muted-fg); opacity: .75; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rail .unreg-undo { flex: none; display: inline-flex; align-items: center; gap: 3px; padding: 2px 7px; border: 1px solid var(--wb-line); border-radius: 999px; background: var(--wb-card); color: var(--wb-primary); font: 600 10.5px var(--wb-sans); white-space: nowrap; cursor: pointer; }
+.rail .unreg-undo:hover { background: var(--wb-muted); }
+.rail .unreg-undo .i { width: 10px; height: 10px; stroke-width: 1.8; }
+
+
+.rail .unreg-sessions[hidden], .rail .unreg-filter-empty[hidden], .rail .unreg-draft-pill[hidden] { display: none; }
+.rail .unreg-row[hidden] { display: none; }
+.rail .rws-unreg .unreg-row, .rail .rws-unreg .unreg-list, .rail .rws-unreg .unreg-body { min-width: 0; box-sizing: border-box; }

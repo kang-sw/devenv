@@ -8,7 +8,7 @@ const { chromium } = require(process.env.WS_PLAYWRIGHT_MODULE || 'playwright');
 const assets = path.join(__dirname, '../assets');
 const { readAssetSource } = require('../../wsdashboard/testdata/asset-source.cjs');
 const css = readAssetSource('wswhiteboard', 'page.css');
-const stream = fs.readFileSync(path.join(assets, 'stream.js'), 'utf8');
+const stream = readAssetSource('wswhiteboard', 'stream.js');
 const arrival = stream.slice(stream.indexOf('/* Latest agent arrival:'));
 const captures = path.resolve(process.env.WS_RECAP_CAPTURE_DIR || '.artifacts/recap-max4');
 function recap(id) {

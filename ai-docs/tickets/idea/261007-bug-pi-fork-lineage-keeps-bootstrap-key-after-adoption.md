@@ -1,5 +1,5 @@
 ---
-title: Pi fork lineage keeps the bootstrap key after revive adoption
+title: "Pi fork 계보가 revive key 인계 후에도 부트스트랩 키를 유지하는 문제"
 ---
 
 # Pi fork lineage keeps the bootstrap key after revive adoption

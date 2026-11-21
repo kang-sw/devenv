@@ -1,5 +1,5 @@
 ---
-title: "Daemon extension protocol: the dashboard daemon dials an adapter WebSocket server that bridges an external chat application"
+title: "데몬 확장 프로토콜: 외부 채팅 앱을 연결하는 어댑터 WebSocket 서버에 dashboard 데몬이 접속"
 related:
   261107-epic-ws-dashboard-messenger-round2: "dashboard-side messaging UI; not the external bridge"
 ---

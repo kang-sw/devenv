@@ -67,13 +67,6 @@ func MermaidAsset() (name string, data []byte) {
 	return mermaidName, mermaidJS
 }
 
-// UsesMermaid reports whether a rendered page loads the shared mermaid
-// script, so the page writer stores it beside the page.
-func UsesMermaid(page string) bool {
-	name, _ := MermaidAsset()
-	return strings.Contains(page, `<script src="`+name+`">`)
-}
-
 // markdown holds a page's goldmark pipelines; all resolve item references
 // and link targets against that page.
 type markdown struct {
@@ -380,10 +373,9 @@ func (t target) isAction() bool { return t.action.Href != "" || t.action.Abs != 
 // paths, file: URLs, http(s) URLs, and fragment-only in-page anchors; images
 // accept relative paths and file: URLs only, so a page never fetches from the
 // network. A relative path resolves against the session root and a bare
-// absolute path is a file path; both, and every file: URL, go through the
-// page's FileLink, which links them from wherever the page is written. On a
-// page with FileText a file target instead comes back as path text, with an
-// empty href, and on a page with FileActions also as an action link. An
+// absolute path is a file path. On a page with FileText a file target comes
+// back as path text, with an empty href, and on a page with FileActions also
+// as an action link. An
 // image file target on a page with ImageSrc comes back as the src ImageSrc
 // returns, unless it returns empty (see fileTarget). An attachment:<oid>
 // image comes back as the src attachmentSrc returns, when that is a daemon
@@ -582,20 +574,15 @@ func daemonPath(href string) bool {
 }
 
 // pathURLEscaper keeps a decoded "#" or "?" in a file name from starting a
-// fragment or query; a file: URL from FileLink already has them escaped.
+// fragment or query.
 var pathURLEscaper = strings.NewReplacer("#", "%23", "?", "%3F")
 
-// fileHref links a file path through FileLink and checks the href it gets
-// back, not only the destination it started from: a relative result whose
-// first segment holds a colon ("javascript:alert(1)", for a file of that
-// name beside the page, or a decoded "javascript%3A...") would read as a
-// scheme, so it is anchored with "./". Only a scheme-less href or a file:
-// URL leaves here as is.
+// fileHref checks a file path before using it as an href: a relative path
+// whose first segment holds a colon ("javascript:alert(1)", for example)
+// would read as a scheme, so it is anchored with "./". Only a scheme-less
+// href or a file: URL leaves here as is.
 func (p *pageData) fileHref(path, suffix string) string {
 	href := filepath.ToSlash(path)
-	if p.FileLink != nil {
-		href = p.FileLink(path)
-	}
 	href = pathURLEscaper.Replace(href)
 	if u, err := url.Parse(href); err != nil || (u.Scheme != "" && !strings.EqualFold(u.Scheme, "file")) {
 		href = "./" + href
@@ -981,9 +968,8 @@ func writeAltText(w util.BufWriter, source []byte, n ast.Node) {
 	}
 }
 
-// fencedCode renders a mermaid block as <pre class="mermaid"> holding its
-// source, which the shared mermaid script draws and a host that cannot load
-// that script still shows as readable text; any other fence is a code block.
+// fencedCode renders mermaid as a diagram source and diff/patch as escaped,
+// classified lines. Other fences keep their ordinary code block markup.
 func (r *mdRenderer) fencedCode(w util.BufWriter, source []byte, node ast.Node, entering bool) (ast.WalkStatus, error) {
 	if !entering {
 		return ast.WalkContinue, nil
@@ -991,6 +977,10 @@ func (r *mdRenderer) fencedCode(w util.BufWriter, source []byte, node ast.Node, 
 	n := node.(*ast.FencedCodeBlock)
 	lang := string(n.Language(source))
 	mermaid := strings.EqualFold(lang, "mermaid") && !r.page.noMermaid
+	diff := strings.EqualFold(lang, "diff") || strings.EqualFold(lang, "patch")
+	if diff {
+		lang = strings.ToLower(lang)
+	}
 	if mermaid {
 		r.page.Mermaid = true
 		_, _ = w.WriteString(`<pre class="mermaid">`)
@@ -1005,7 +995,14 @@ func (r *mdRenderer) fencedCode(w util.BufWriter, source []byte, node ast.Node, 
 	}
 	for i := 0; i < n.Lines().Len(); i++ {
 		segment := n.Lines().At(i)
-		_, _ = w.Write(util.EscapeHTML(segment.Value(source)))
+		line := segment.Value(source)
+		if diff {
+			_, _ = w.WriteString(`<span class="wb-diff-` + diffLineKind(line) + `">`)
+		}
+		_, _ = w.Write(util.EscapeHTML(line))
+		if diff {
+			_, _ = w.WriteString(`</span>`)
+		}
 	}
 	if mermaid {
 		_, _ = w.WriteString("</pre>\n")
@@ -1013,6 +1010,22 @@ func (r *mdRenderer) fencedCode(w util.BufWriter, source []byte, node ast.Node, 
 		_, _ = w.WriteString("</code></pre>\n")
 	}
 	return ast.WalkSkipChildren, nil
+}
+
+func diffLineKind(line []byte) string {
+	s := string(line)
+	switch {
+	case strings.HasPrefix(s, "+++"), strings.HasPrefix(s, "---"), strings.HasPrefix(s, "diff "), strings.HasPrefix(s, "index "):
+		return "file"
+	case strings.HasPrefix(s, "@@"):
+		return "hunk"
+	case strings.HasPrefix(s, "+"):
+		return "add"
+	case strings.HasPrefix(s, "-"):
+		return "remove"
+	default:
+		return "context"
+	}
 }
 
 // itemRef renders a reference to an item on the page as an in-page anchor

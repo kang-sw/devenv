@@ -1,5 +1,5 @@
 ---
-title: Bound and filter ws-agent-list output
+title: "ws-agent-list 출력 크기 제한 및 필터링"
 ---
 
 # Bound and filter ws-agent-list output

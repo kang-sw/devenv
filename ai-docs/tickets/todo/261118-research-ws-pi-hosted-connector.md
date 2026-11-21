@@ -1,5 +1,5 @@
 ---
-title: "Pi as the canonical daemon-hosted connector, with provider and login layers on top"
+title: "표준 데몬 hosted 커넥터로서의 Pi와 그 위의 프로바이더·로그인 레이어"
 parent: 261114-epic-ws-common-session-foundation
 related:
   261112-research-ws-ade-desktop-shell-and-rename: "(494)=a zero-install and (495)=a built-in agent = bundled Pi standalone binary with our extension in isolated mode; this ticket carries that decision's remaining checks (login flows) into stage 3"

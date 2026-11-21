@@ -220,7 +220,11 @@ func TestPanelVersionsKeepWriteOrderAndLinks(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("versions\n got %q\nwant %q", got, want)
 	}
-	out := markup(render(t, view))
+	regions, err := RenderRegions(view)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := string(regions.Board)
 	previous, rows := -1, 0
 	for _, e := range st.Topics[0].Entries {
 		if e.Kind != EntryPanel && e.Kind != EntryAgent {
@@ -393,14 +397,14 @@ func TestPanelTargetsBeyondClosedTopicCapStayNavigable(t *testing.T) {
 	if len(view.Topics) != ClosedCap+1 || len(view.DeferredTopics) != 2 {
 		t.Fatalf("closed cap/window changed: shown %d deferred %d", len(view.Topics), len(view.DeferredTopics))
 	}
-	out := markup(render(t, view))
-	wantAll(t, out, `See <a href="#p1">p1</a>`, `<template data-history-topic="closed-1">`, `id="p1"`)
-	if strings.Index(out, `id="p1"`) < strings.Index(out, `<template data-history-topic="closed-1">`) {
-		t.Fatal("capped topic panel is live before explicit navigation")
-	}
 	regions, err := RenderRegions(view)
 	if err != nil {
 		t.Fatal(err)
+	}
+	out := string(regions.Board) + frameDocs(t, string(regions.Board))["open"]
+	wantAll(t, out, `See <a href="#p1">p1</a>`, `<template data-history-topic="closed-1">`, `id="p1"`)
+	if strings.Index(out, `id="p1"`) < strings.Index(out, `<template data-history-topic="closed-1">`) {
+		t.Fatal("capped topic panel is live before explicit navigation")
 	}
 	wantAll(t, string(regions.Board), `<template data-history-topic="closed-1">`, `data-doc="entry:e1"`)
 }
@@ -413,17 +417,20 @@ func TestPanelAuthoredReferencesAcrossAllSurfaces(t *testing.T) {
 	st.Topics[0].Entries[4].Text = "log {{p1}} {{1}} {{p99}} and `{{p1}}`"
 	st.Topics[0].Entries[8].Text = "panel {{p1}} {{1}} {{p99}} and `{{p1}}`"
 	view := BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"})
-	out := markup(render(t, view))
+	regions, err := RenderRegions(view)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := string(regions.Board)
+	docs := frameDocs(t, string(regions.Board))
+	for _, doc := range docs {
+		out += doc
+	}
 	for _, field := range []string{"title", "option", "rec", "why", "link", "content", "log", "panel"} {
 		wantAll(t, out, field+` <a href="#p1">p1</a>`)
 	}
 	wantAll(t, out, `<code>{{p1}}</code>`, `<div data-ref="{{p1}}">{{p1}}</div>`, "{{p99}}", `<a href="#item-1">(01)</a>`)
 	wantNone(t, out, `href="#p99"`, `<code><a href="#p1"`)
-	regions, err := RenderRegions(view)
-	if err != nil {
-		t.Fatal(err)
-	}
-	docs := frameDocs(t, string(regions.Board))
 	wantAll(t, docs["t"], `content <a href="#p1">p1</a>`, `<div data-ref="{{p1}}">{{p1}}</div>`)
 	wantAll(t, docs["entry:e9"], `panel <a href="#p1">p1</a>`)
 	// A known target outside this topic window is still linked: older
@@ -483,45 +490,24 @@ func TestExpandedQuietTopicCardCSS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// One section surface aligns both body variants and the stream with the
-	// bar. A dashboard fold stays transparent unless temporarily maximized;
-	// standalone details acquire the surface only while open.
+	// One section surface aligns the framed body and stream with the bar. A
+	// dashboard fold stays transparent unless temporarily maximized.
 	wantAll(t, string(css),
 		`.topic { background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow);`,
 		`.topic.quiet { box-shadow: none; background: transparent; }`,
 		`.topic.quiet[data-size]:not([data-size="fold"]),
-.topic.quiet:not([data-size]):has(> details.tdoc[open]),
 .topic.quiet[data-max] { background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow); }`,
 		`.entry-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }`,
 		`.topic.quiet .tbar details.settled[open] { flex: 1 0 100%; width: 100%; min-width: 0; padding-bottom: 4px; }`,
 		`.topic.quiet .tbar details.settled .chead { flex-wrap: wrap; }`,
 	)
-	// The native disclosure must not draw a second, inset card inside the
-	// section; framed div.tdoc has no native open attribute at all.
-	wantNone(t, string(css), `.topic.quiet details.tdoc[open] {`)
+	wantNone(t, string(css), `details.tdoc`)
 	for _, selector := range regexp.MustCompile(`\.topic\.quiet[^,{]*:has\([^)]*(?:div\.tdoc|\.topic-stream)[^)]*\)`).FindAllString(string(css), -1) {
 		guard := strings.SplitN(selector, ":has(", 2)[0]
 		if !strings.Contains(guard, "[data-size]") {
 			t.Errorf("quiet surface has a body/stream condition without an explicit dashboard size: %s", selector)
 		}
 	}
-}
-
-func TestStandaloneClosedTopicWithHistoryKeepsBodyCollapsed(t *testing.T) {
-	st := streamFixture()
-	st.ClosedTopics = []string{"t"}
-	out := markup(render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"})))
-	// Panel diff annotations can put newlines in the rendered body.
-	topic := regexp.MustCompile(`(?s)<section class="topic[^>]* data-topic="t"[^>]*>.*?</section>`).FindString(out)
-	if topic == "" {
-		t.Fatal("closed topic missing")
-	}
-	wantAll(t, topic, `class="topic closed has-doc"`, `<details class="tdoc" data-key="doc:t"`, `<div class="topic-stream">`)
-	wantNone(t, topic, `class="topic quiet`, `data-size=`, `data-max`, `<details class="topic-stream"`)
-	disclosure := regexp.MustCompile(`<details class="tdoc"[^>]*>`).FindString(topic)
-	wantNone(t, disclosure, ` open`)
-	// Whole history stays visible on a closed full-page topic; only its body
-	// retains the standalone disclosure, independently of dashboard sizing.
 }
 
 // Owner rule: a log row's role marker sits on the first line beside the clock,

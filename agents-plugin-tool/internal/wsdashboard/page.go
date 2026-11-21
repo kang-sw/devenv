@@ -75,7 +75,7 @@ type PageContent struct {
 	// BoardIncarnation is the recovered load boundary, unchanged by edits.
 	BoardIncarnation string
 	// Board is the session's whiteboard board and panels, rendered by the
-	// static page's templates (wswhiteboard.RenderRegions) with the served
+	// fragment renderer (wswhiteboard.RenderRegions) with the served
 	// page's link rule: a file link renders as an action link titled with
 	// its repo-relative path (View.FileText, View.FileActions, FileActions),
 	// a board image inside the session's project root as the image route's

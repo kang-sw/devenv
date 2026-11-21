@@ -78,6 +78,21 @@ type AgentForgetter interface {
 	ForgetClosed(replyID string)
 }
 
+// AgentSessionMeta holds a runner conversation's in-memory child and settings
+// metadata for SessionView rendering without touching disk.
+type AgentSessionMeta struct {
+	Hosted  bool
+	IsChild bool
+	Model   string
+	Effort  string
+}
+
+// AgentSessionMetaHost is an optional AgentHost that exposes in-memory child
+// and settings metadata for SessionView.
+type AgentSessionMetaHost interface {
+	SessionMeta(replyID string) (AgentSessionMeta, bool)
+}
+
 // AgentRoutePrefix is where the daemon mounts AgentHost.Handler.
 const AgentRoutePrefix = "/agents"
 
@@ -109,6 +124,7 @@ func (s agentSessions) ReadSession(reg Registration) (SessionData, bool, error) 
 	}
 	if !reg.Agent {
 		s.snaps.snapshotWithoutObserved(s.dir, reg.ReplyID)
+		s.snaps.warmOutputRate(s.dir, reg.ReplyID)
 		return s.inner.ReadSession(reg)
 	}
 	if _, err := os.Stat(SessionDir(s.dir, reg.ReplyID)); err != nil {
@@ -117,6 +133,7 @@ func (s agentSessions) ReadSession(reg Registration) (SessionData, bool, error) 
 		}
 		return SessionData{}, false, err
 	}
+	s.snaps.warmOutputRate(s.dir, reg.ReplyID)
 	h := sha256.New()
 	stores, updatedAt, staleAt := s.snaps.ReadLiveStoresClock(h, s.dir, reg.ReplyID, s.now(), LiveStoreFingerprint{}, AllLiveStores)
 	return SessionData{Fingerprint: hex.EncodeToString(h.Sum(nil)[:16]), LiveStores: stores, SnapshotUpdatedAt: updatedAt, SnapshotStaleAt: staleAt}, true, nil
@@ -128,11 +145,13 @@ func (s agentSessions) ReadLiveSession(reg Registration, previous SessionData, s
 	s.snaps.Invalidate(s.dir, reg.ReplyID)
 	if !reg.Agent {
 		s.snaps.snapshotWithoutObserved(s.dir, reg.ReplyID)
+		s.snaps.warmOutputRate(s.dir, reg.ReplyID)
 		if live, ok := s.inner.(LiveSessionSource); ok {
 			return live.ReadLiveSession(reg, previous, stores)
 		}
 		return s.inner.ReadSession(reg)
 	}
+	s.snaps.warmOutputRate(s.dir, reg.ReplyID)
 	h := sha256.New()
 	previous.LiveStores, previous.SnapshotUpdatedAt, previous.SnapshotStaleAt = s.snaps.ReadLiveStoresClock(h, s.dir, reg.ReplyID, s.now(), previous.LiveStores, stores)
 	previous.Fingerprint = hex.EncodeToString(h.Sum(nil)[:16])
@@ -252,6 +271,15 @@ func (s agentSessions) ClearLiveSnapshot(stateDir, replyID string) {
 func (s agentSessions) ReadTicketIdeas(reg Registration) ([]IdeaTicket, bool, error) {
 	if src, ok := s.inner.(TicketIdeasSource); ok && !reg.Agent {
 		return src.ReadTicketIdeas(reg)
+	}
+	return nil, false, nil
+}
+
+// ReadTicketGraph forwards to the configured source; an agent conversation
+// has no ticket panel.
+func (s agentSessions) ReadTicketGraph(reg Registration) ([]byte, bool, error) {
+	if src, ok := s.inner.(TicketGraphSource); ok && !reg.Agent {
+		return src.ReadTicketGraph(reg)
 	}
 	return nil, false, nil
 }

@@ -102,7 +102,11 @@ and `todos.json`. A pre-0.50 `whiteboard.json` remains an immutable rollback
 snapshot. Whiteboards now live under the project's
 `ai-docs/whiteboards/<reply-id>/`: versioned session `meta.json`, opaque topic
 folders holding `meta.json`, immutable panel versions, and append-only
-`log.jsonl`, with a derived `index.html`. The first board open (queries and
+`log.jsonl`. The daemon renders pages from this store without writing page
+artifacts. Its first board open schedules one background cleanup per project
+and cache root: retired index/stamp and hashed Mermaid files, plus dead
+sessions' repository embed snapshots. The cleanup preserves board data and
+live embeds and uses no marker or recurring GC. The first board open (queries and
 dashboard reads included) converts the old snapshot once under the folder
 lock. New writes never update either old board representation, and key expiry
 does not delete authoritative topic folders. An absent agenda/todo part is empty. A write replaces only the part files it changes, each atomically, and
@@ -153,7 +157,7 @@ under `<cache root>/dashboard/`:
   start is needed. Older daemons ignore it; settled binaries remain available.
   The retired `hosted-plugin-roots.json` registry is ignored, not migrated.
 - `hosted-packages/<ws|wsflow>/<hash>/` - retained launcher plus that package's
-  four embedded manifests. Native Pi's separate content-addressed input stage
+  five embedded manifests. Native Pi's separate content-addressed input stage
   supplies its workflow skills, resources and package-owner manifest.
 - `dashboard.lock` - the single-instance OS file lock; `endpoint.json` - port,
   pid, version, and the shutdown token; `launcher-start.lock` - the persistent
@@ -729,10 +733,9 @@ conversation for good; later writes get 409), and `/settings {model?,
 effort?}` (from the next turn). Every POST needs a JSON body
 (`Content-Type: application/json`) and either no `Origin` (a client on this
 machine) or the daemon's own, so no other web page can drive an agent. After
-a daemon restart or replace, hosted leads (Claude or Pi) and non-lead Pi
-conversations reattach to their surviving session holders, keeping the same
-process and running turn. Non-lead Claude conversations, and Pi conversations
-run without a holder manager, instead start a process at their next send.
+a daemon restart or replace, process continuity follows the ownership matrix
+in Daemon replacement and process ownership below.
+
 An attached ws-mcp gets
 `WS_MCP_ALLOWED_TOOLS` (the profile's ws tools) and `WS_MCP_NO_DASHBOARD`,
 and no mailbox identity. Its command is Python plus the selected build-owned
@@ -884,7 +887,7 @@ Pi calls share this route; the Pi-specific legacy behavior follows:
   (`WS_MCP_PI_ENDPOINT`, set by `ws-mcp dashboard` through
   `Runner.SetEndpoint` before `Start`) in its attached ws-mcp's environment.
   The token is drawn at every actual process launch and void once that
-  process ends or the conversation closes. A holder-backed Pi worker keeps it
+  process ends or the conversation closes. A holder-backed worker keeps it
   in its record; the successor restores it only after checking the recorded
   holder association, so reattachment does not revoke a surviving worker's
   ability to call delegation tools. A conversation opened through `POST /agents`, or
@@ -1063,7 +1066,7 @@ from a support conversation:
   agy's `WorkerAutoApprove` answers requests through `AnswerApproval`,
   preserving the permission trace. Its workers use the default agent with
   an appended instruction to use `agent.spawn`, never native subagents;
-  unlike hosted leads, they end with the daemon and are not holder-held.
+  see Daemon replacement and process ownership for worker lifetime.
   agy tier models are base ids with separate effort: launch uses
   `thought_level` when offered, otherwise a suffixed model id, and logs the
   mechanism honored. An unhonored worker effort refuses the launch.
@@ -1468,8 +1471,7 @@ tree instead of its embedded copies, re-reading and re-parsing them on every
 request, so an edit shows on a browser reload and only Go changes need a
 rebuild. Off when unset; a root without those directories fails the daemon at
 startup, and a file that resolves outside the root (a symlink) is refused. The
-vendored mermaid bundle and the MCP server's own whiteboard page file and embed
-stay embedded. A running daemon keeps its mode, so shut it down first
+vendored Mermaid bundle stays embedded. A running daemon keeps its mode, so shut it down first
 (`POST /shutdown` above), then start
 `WS_MCP_DASHBOARD_DEV_SOURCE=$PWD/agents-plugin-tool ws-mcp dashboard`; a
 half-edited template answers 500 (the error is in `dashboard.log`) and the next
@@ -1512,13 +1514,62 @@ actual replacement attempts. Third-party flock and directory-entry `Info`
 operations are not included. Counts are process-lifetime and never reset by
 reading the route; compare two samples over the same observation interval.
 
+### Daemon replacement and process ownership
+
+For a graceful replace, the process owner determines whether an in-flight turn
+continues (`internal/wsagent/runner_events.go` L804-818).
+
+| Child kind | Owner | Survives graceful replace? | What to do |
+|---|---|---|---|
+| Hosted Claude, Pi, agy, or Codex lead | Session holder (`internal/wsagent/runner_process.go` L229-258, L294-312) | Yes, while holder and child survive | Replace; check rejoin if progress stalls. |
+| Claude, Codex, agy, or Pi `agent.spawn` worker | Session holder (`internal/wsagent/runner_process.go`, `startWorker`) | Yes, while holder and child survive | Replace; check rejoin if progress stalls. |
+| Legacy direct worker still running under an older daemon | Daemon subprocess | No; shutdown stops it | Send a new message after replace; its next launch uses a holder. |
+
+Healthy held leads and workers can continue through a normal daemon replacement.
+A successor validates the worker holder's kind, backend, reply id, cwd,
+capability hash, and harness PID before restoring its delegation capability
+and HTTP-MCP tuple. The tuple keeps the original token, URL, environment, and
+holder binding: an already-running worker cannot learn a rotated token.
+Attach uses the child's persisted authority; current-parent admission is checked
+after records load and governs its next launch. Replay rebuilds turn state,
+deduplicates answered controls, and auto-allows remaining requests for backends
+whose worker policy enables it.
+
+New workers use the `agent-worker` holder kind and a `handed_off_at` fence.
+An older daemon sees that child as ended, starts no worker, leaves its record
+unchanged, and does not recognize its holder kind. This surviving-child-row
+behavior is T1. The complete downgrade surface follows owner decision (1855)=a:
+T2 with the explicit exception that a downgrade beyond the 7-day
+`RegistryRetention` may irrecoverably delete the child's session history.
+An old daemon may also release and rewrite a held conversation parent's turn.
+Live legacy `pi-worker` holders retain their unfenced shape and remain adoptable.
+
+On re-upgrade, a fenced open child of a settled conversation parent is silently
+retired only when its nonzero start strictly predates the parent's terminal
+settlement stamp, the parent's sends do not exceed its last turn's mark, and
+its held mail and queued input are empty. Invalid, equal, or same-second
+stamps adopt the child; the parent timestamp has second precision. Retirement
+clears the active turn and holder fence in one record update and leaves a
+wakeable sleeping child, preserving its last result and sending no second
+parent report. A lead parent instead restores its held turn, adopts the child,
+and receives one late report. An old-pruned child leaves an unowned holder for
+the successor's orphan sweep.
+
+Interrupt remains turn-scoped. Idle timeout, explicit stop, close, and expiry
+end the holder and revoke its tokens. A legacy direct worker's open turn
+settles `interrupted` once before queued input starts its next held process.
+A lost 32 MiB ring uses existing backend recovery; a backend that cannot
+reconcile the lost turn reports failure honestly. Re-arming agy's model-wait
+watchdog across replacement remains outside this contract, matching held leads.
+MCP calls during drain may receive 503. Windows survival requires a
+restart-safe holder; one still inside its starter's job object may end with it.
+
 Session holders: a holder is a small Python process (standard library only,
 3.10 or newer) that owns one child process, over pipes or a PTY (ConPTY on
 Windows), and outlives the daemon, so the child survives a daemon restart
 or replace while the holder and child remain alive (Windows holders marked
-not restart-safe have no such guarantee). Hosted leads of either backend,
-non-lead Pi conversations including `pi.spawn` subagents, and dashboard
-terminals use holders; non-lead Claude conversations do not.
+not restart-safe have no such guarantee). Dashboard terminals also use holders;
+see Daemon replacement and process ownership above for lead and worker ownership.
 The script is embedded in `ws-mcp` (`internal/wsholder/holder.py`, whose
 module docstring is the descriptor and protocol reference) and staged to
 `<dashboard dir>/holders/bin/holder-<content hash>.py` before a holder
@@ -1536,7 +1587,7 @@ while the child lives.
 The daemon scans the holders directory at start and every 3 minutes,
 attaches to every holder over loopback TCP with the descriptor's token, and
 replays the holder's output ring (sequenced; 4 MiB for a terminal holder,
-32 MiB for a hosted lead or Pi worker's holder, `leadRingBytes`, so a rejoin
+32 MiB for a hosted lead or worker's holder, `leadRingBytes`, so a rejoin
 rebuilds a long turn whole; a reattach within one
 daemon process continues after the last sequence it saw, a new daemon
 process replays the whole ring). The newest authenticated attach takes over,
@@ -1907,7 +1958,7 @@ Current launcher inputs:
 | `WS_MCP_PI_ENDPOINT` | Set beside `WS_MCP_PI_TOKEN`: the dashboard daemon's loopback base URL, for example `http://127.0.0.1:29417`. |
 | `WS_MCP_NAMESPACE` | MCP namespace and embedded package identity: `wsflow` selects wsflow assets; empty/unset or a custom display namespace selects ws. |
 | `WS_MCP_SETUP_TOOL` | Advertised setup tool name override; empty or unset defaults to `ws.setup`. |
-| `WS_MCP_CONFIG_MANIFESTS` | Adapter config key manifests, separated by the platform path-list separator (`:` POSIX, `;` Windows); `;` is accepted on every platform, which the static launcher configs use. Declared keys become `config.tune`-writable, cataloged by `config.list`, and typed in `config.get`; a rejected manifest is logged to stderr and listed by `config.list`. The ws and wsflow packages each ship their own `config-manifest.json` (namespace `claude.`; the same keys, differing only in `default`, pinned by `TestShippedClaudeManifestsDifferOnlyInDefaults`) and set it in both launch configs: `.mcp.json` (Codex) as `./config-manifest.json`, resolved against `cwd: "."` (the plugin root), and `.claude-plugin/plugin.json` as `${CLAUDE_PLUGIN_ROOT}/config-manifest.json`. Each package (ws, wsflow, Pi) also lists its `dashboard-config-manifest.json` (namespace `dashboard.`: `dashboard.enabled`, default on in every package; `dashboard.port`, default 29417; `dashboard.lan_enabled`, global-only and default off in every package; `dashboard.pi_spawn_enabled`, which gates legacy `pi.*` calls, default on in ws and off in wsflow and Pi) beside its own manifest; the Pi bridge joins the two with the platform separator. A path that does not resolve fails nothing: the keys stay undeclared, so check `config.list` after changing either. |
+| `WS_MCP_CONFIG_MANIFESTS` | Adapter config key manifests, separated by the platform path-list separator (`:` POSIX, `;` Windows); `;` is accepted on every platform, which the static launcher configs use. Declared keys become `config.tune`-writable, cataloged by `config.list`, and typed in `config.get`; a rejected manifest is logged to stderr and listed by `config.list`. The ws and wsflow packages each list three package-local manifests in both launch configs: `config-manifest.json` (namespace `claude.`; the same keys, differing only in `default`, pinned by `TestShippedClaudeManifestsDifferOnlyInDefaults`), `agy-config-manifest.json` (namespace `agy.`; `agy.model_wait_timeout_seconds`, default 120 in ws and 0 in wsflow, plus `agy.model_wait_retries`, default 3 in both), and `dashboard-config-manifest.json` (namespace `dashboard.`: `dashboard.enabled`, default on in every package; `dashboard.port`, default 29417; `dashboard.lan_enabled`, global-only and default off in every package; `dashboard.pi_spawn_enabled`, which gates legacy `pi.*` calls, default on in ws and off in wsflow and Pi). Codex paths are relative to `cwd: "."` (the plugin root); Claude paths use `${CLAUDE_PLUGIN_ROOT}`. Pi lists its own config and dashboard manifests, joined with the platform separator. A path that does not resolve fails nothing: the keys stay undeclared, so check `config.list` after changing the list. |
 | `WS_MCP_CLI_NAME` | Declared `ws-cli` / `wsflow-cli` shim or Python launcher command used in printed mailbox wait and re-arm guidance when it matches the supported safe form. The launcher sets it unless already set; an absent or unrecognized value uses an illustrative Python launcher path, never the runtime binary. |
 
 Launcher diagnostics must go to stderr. Stdout belongs to the MCP JSON-RPC

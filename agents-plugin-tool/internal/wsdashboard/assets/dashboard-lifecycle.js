@@ -102,12 +102,13 @@
   function readDraft() {
     var b = region("board"), open = {};
     Object.keys(openState).forEach(function (k) { if (openState[k] && k.indexOf("k:history:") !== 0) open[k] = true; });
-    var prefix = selectionPrefix(bselections);
+    var prefix = inlineEditor() ? "" : selectionPrefix(bselections);
     var shift = function (r) { return Object.assign({}, r, { start: r.start + prefix.length, end: r.end + prefix.length }); };
     var d = {
       boardIncarnation: typeof boardIncarnation === "string" ? boardIncarnation : null,
       text: prefix + (ctext ? ctext.value : ""),
       capsules: ctext && ctext.wsc ? ctext.wsc.snapshot().map(shift) : [],
+      selections: inlineEditor() ? bselections.map(function (s) { return { key: s.key, mentions: s.mentions, comment: s.comment, images: s.images }; }) : [],
       cmd: cmdSel ? { name: cmdSel.name, args: cmdSel.args } : null,
       mentions: mentions.map(function (m) { return shift({ start: m.start, end: m.end, text: m.text }); }),
       answers: b ? boardRead(readAnswers) : {},
@@ -148,7 +149,14 @@
   function boardDraft(d) {
     if (d && typeof d.boardIncarnation === "string" && d.boardIncarnation !== boardIncarnation) {
       // Keep free text and image references, never reattach replaced IDs.
-      return Object.assign({}, d, { boardIncarnation: boardIncarnation, answers: {}, chips: [], bmentions: [], closeRequests: [] });
+      var text = d.text || "", ranges = Array.isArray(d.capsules) ? d.capsules.slice() : [];
+      ranges.filter(function (r) { return /^(answer|topic-note|mention)$/.test(r.kind); }).reverse().forEach(function (cut) {
+        text = text.slice(0, cut.start) + text.slice(cut.end);
+        ranges = ranges.filter(function (r) { return r !== cut && (r.end <= cut.start || r.start >= cut.end); }).map(function (r) {
+          return r.start >= cut.end ? Object.assign({}, r, { start: r.start - (cut.end - cut.start), end: r.end - (cut.end - cut.start) }) : r;
+        });
+      });
+      return Object.assign({}, d, { boardIncarnation: boardIncarnation, text: text, capsules: ranges, selections: [], answers: {}, chips: [], bmentions: [], closeRequests: [] });
     }
     return d;
   }
@@ -164,6 +172,7 @@
       d.text = split.text;
       d.mentions = selectionRanges(d.mentions, split.cuts);
       d.capsules = selectionRanges(d.capsules, split.cuts);
+      if (inlineEditor() && Array.isArray(d.selections)) bselections = d.selections.filter(function (s) { return s && s.key && Array.isArray(s.mentions) && Array.isArray(s.images); });
       if (Array.isArray(d.sel)) {
         var caret = selectionRanges([{ start: d.sel[0], end: d.sel[1] }], split.cuts)[0];
         d.sel = caret ? [caret.start, caret.end] : [0, 0];
@@ -173,6 +182,12 @@
         return s;
       });
       bselections.forEach(function (s) { named += "\n" + s.images.map(marker).join(" "); });
+      // Restore the editor before board controls reconcile their answers;
+      // otherwise their upserts would consume the empty composer caret.
+      if (ctext && typeof d.text === "string" && d.text && inlineEditor()) {
+        ctext.value = WsRail.stripMarkers(d.text, [], lost).text;
+        ctext.wsc.restore(window.WsCapsules.stripMarkers(d.text, d.capsules, lost).ranges);
+      }
       if (cchips) renderChips();
       // A lost image's marker leaves the notes as it leaves the text; what
       // the restored notes still name may bring a reference image back.
@@ -215,7 +230,7 @@
         renderChips();
       }
       if (ccmd && !cmdSel && d.cmd && typeof d.cmd.name === "string" && d.cmd.name) setCommand(d.cmd.name, d.cmd.args);
-      if (ctext && typeof d.text === "string" && d.text && !ctext.value) {
+      if (ctext && typeof d.text === "string" && d.text && (!ctext.value || inlineEditor())) {
         var s = WsRail.stripMarkers(d.text, Array.isArray(d.mentions) ? d.mentions : [], lost);
         ctext.value = s.text;
         if (ctext.wsc) ctext.wsc.restore(window.WsCapsules.stripMarkers(d.text, d.capsules, lost).ranges);
@@ -582,12 +597,13 @@
     }
     if (qs && qs.innerHTML !== (m ? m.qs : "")) qs.innerHTML = m ? m.qs : "";
     shTop.style.paddingRight = m ? m.pad + "px" : "";
+    var side = m && typeof m.side === "number" && isFinite(m.side) && m.side > 0 ? m.side : 0;
+    shTop.style.setProperty("--sh-stage-side", side ? side + "px" : "");
     // Headerless fallback clears stale session controls, not their box.
     if (m) shTop.style.minHeight = m.top + "px";
     railRenameNew();
   }
-  // shLayout takes the shown frame's pinned column (the rail overlays
-  // beside it below 2200px) and its backdrop's dim.
+  // shLayout takes the shown frame's pinned column and its backdrop's dim.
   function shLayout(ent) {
     if (ent.pincol !== root.hasAttribute("data-pincol")) {
       if (ent.pincol) root.setAttribute("data-pincol", ""); else root.removeAttribute("data-pincol");
@@ -692,11 +708,12 @@
       var t = e.target;
       if (!t || !t.closest) return;
       if (t.closest("#tkqs")) { e.preventDefault(); shSearch(); return; }
-      if (t.closest(".host.hbtn") && shOn) { e.preventDefault(); try { shOn.el.focus(); } catch (x) {} shSend(shOn, "menu"); }
+      // The mirrored permission chip opens the same session menu.
+      if (t.closest(".host.hbtn, .pmhead[role=button]") && shOn) { e.preventDefault(); try { shOn.el.focus(); } catch (x) {} shSend(shOn, "menu"); }
     });
     if (shTop) shTop.addEventListener("keydown", function (e) {
       var t = e.target;
-      if ((e.key !== "Enter" && e.key !== " ") || !t || !t.classList || !t.classList.contains("hbtn") || !shOn) return;
+      if ((e.key !== "Enter" && e.key !== " ") || !t || !t.classList || !(t.classList.contains("hbtn") || (t.classList.contains("pmhead") && t.getAttribute("role") === "button")) || !shOn) return;
       e.preventDefault();
       try { shOn.el.focus(); } catch (x) {}
       shSend(shOn, "menu");
@@ -727,7 +744,7 @@
     }
     // dim is the alpha of the backdrop the page shows over the whole
     // window: a modal dialog's, or an overlay's (the item and git windows,
-    // the image viewer, a maximized card's scrim).
+    // the image viewer, a maximized card's scrim, the ticket map).
     function dim() {
       var a = window.WsOverview && window.WsOverview.active() ? 0.72 : 0;
       q("dialog[open]").forEach(function (d) {
@@ -735,7 +752,7 @@
         try { modal = d.matches(":modal"); } catch (x) { modal = false; }
         if (modal) a = Math.max(a, window.WsShell.alpha(getComputedStyle(d, "::backdrop").backgroundColor));
       });
-      q(".tk-iwin-back:not([hidden]), .gwin-back:not([hidden]), .wbv:not([hidden]), .bc-scrim:not([hidden])").forEach(function (el) {
+      q(".tk-iwin-back:not([hidden]), .gwin-back:not([hidden]), .wbv:not([hidden]), .bc-scrim:not([hidden]), .d-tm-back:not([hidden])").forEach(function (el) {
         if (el.getClientRects().length) a = Math.max(a, window.WsShell.alpha(getComputedStyle(el).backgroundColor));
       });
       return Math.round(a * 100) / 100;
@@ -748,9 +765,11 @@
       if (headDirty) {
         headDirty = false;
         var top = doc.querySelector(".dwrap > .top"), h = region("head"), qs = $("qsslot");
+        var topCS = top ? getComputedStyle(top) : null;
         head = top ? {
           html: h ? h.innerHTML : null, qs: qs ? inline(qs) : "",
-          pad: (parseFloat(getComputedStyle(top).paddingRight) || 0) + Math.max(0, window.innerWidth - root.clientWidth),
+          pad: (parseFloat(topCS.paddingRight) || 0) + Math.max(0, window.innerWidth - root.clientWidth),
+          side: Math.round((parseFloat(topCS.marginRight) || 0) * 100) / 100,
           top: top.offsetHeight
         } : null;
       }
@@ -773,6 +792,7 @@
     doc.addEventListener("ws-overview", queue);
     var top = doc.querySelector(".dwrap > .top");
     if (window.ResizeObserver && top) new ResizeObserver(queueHead).observe(top);
+    window.addEventListener("resize", queueHead);
     if (window.MutationObserver) {
       var mo = new MutationObserver(queue);
       if (top) new MutationObserver(queueHead).observe(top, { subtree: true, childList: true, attributes: true, characterData: true });
@@ -909,7 +929,9 @@
   // available | ready) the settings line. downloadPage, when the shell sends
   // it, adds [Open download page] (replacing [Update] on available: a shell
   // that does not update itself); the link opens in the system browser
-  // through the shell's window-open handler.
+  // through the shell's window-open handler. A current shell adds an
+  // optional action (canary | stable-return) to statuses and phases of a
+  // manual channel selection, and limited to a canary miss at the page cap.
   function desktopUpdate() {
     var api = window.werkschaftDesktop && window.werkschaftDesktop.update;
     var card = gmenu && gmenu.querySelector(".gmenu");
@@ -930,6 +952,36 @@
     head.textContent = wsT("js.update.title");
     card.insertBefore(head, note);
     var check = item("dupd-check", "↻", wsT("js.update.check"));
+    // Manual channel actions: each control appears only when this shell's
+    // bridge has its member, so an older shell keeps the original row. The
+    // canary pill shares the check row; Back to stable shows only once the
+    // shell reports a packaged canary (a stable relaunch drops it).
+    if (typeof api.checkCanary === "function") {
+      var row = doc.createElement("div");
+      row.className = "dupd-row";
+      card.insertBefore(row, check);
+      row.appendChild(check);
+      var canary = doc.createElement("button");
+      canary.type = "button";
+      canary.id = "dupd-canary";
+      canary.className = "dupd-canary";
+      canary.textContent = wsT("js.update.canary");
+      canary.title = wsT("js.update.canary.hint");
+      row.appendChild(canary);
+      canary.addEventListener("click", function () { api.checkCanary(); });
+    }
+    var stable = null, running = "";
+    if (typeof api.backToStable === "function" && typeof api.channel === "function") {
+      stable = item("dupd-stable", "↩", wsT("js.update.stable"));
+      stable.hidden = true;
+      stable.addEventListener("click", function () { api.backToStable(); });
+      Promise.resolve().then(function () { return api.channel(); }).then(function (c) {
+        if (!c || c.canary !== true) return;
+        running = String(c.version || "");
+        stable.querySelector(".gs").textContent = wsT("js.update.stable.hint", running);
+        stable.hidden = false;
+      }, function () {});
+    }
     var restart = item("dupd-restart", "⏻", wsT("js.update.restart"));
     restart.hidden = true;
     check.addEventListener("click", function () { api.check(); });
@@ -937,7 +989,9 @@
     function phaseLine(p) {
       check.querySelector(".gs").textContent = !p ? "" :
         p.phase === "none" ? wsT("js.update.state.none") :
-        p.phase === "available" ? wsT("js.update.state.available", p.version) + (p.skipped ? " " + wsT("js.update.skipped") : "") :
+        p.phase === "available" ? (p.action === "stable-return" ? wsT("js.update.stable.state", p.version) :
+          p.action === "canary" ? wsT("js.update.canary.state", p.version) :
+          wsT("js.update.state.available", p.version)) + (p.skipped && p.action !== "stable-return" ? " " + wsT("js.update.skipped") : "") :
         p.phase === "ready" ? wsT("js.update.state.ready", p.version) : "";
       restart.hidden = !p || p.phase !== "ready";
     }
@@ -950,21 +1004,32 @@
       var v = String(s.version || ""), m = String(s.message || "");
       var page = typeof s.downloadPage === "string" && /^https:\/\//.test(s.downloadPage) ? s.downloadPage : "";
       var pageAct = page ? [{ label: wsT("js.update.downloadpage"), run: function () { window.open(page, "_blank", "noopener"); } }] : [];
-      if (s.state === "available") {
-        toast(wsT("js.update.available", v) + (s.skipped ? " " + wsT("js.update.skipped") : ""), { sticky: true, dismiss: close, actions:
+      // action names a manual channel selection (canary | stable-return);
+      // an older shell never sends it, so those statuses read as before.
+      var back = s.action === "stable-return", canaryAct = s.action === "canary";
+      if (s.state === "available" && back) {
+        // An explicit downgrade: name the stable target and the running
+        // canary before anything installs. No skip: it is a one-off choice.
+        toast(wsT("js.update.stable.available", v, String(s.current || running || "")), { sticky: true, dismiss: close, actions:
+          page ? pageAct : [{ label: wsT("js.update.stable.install", v), run: function () { api.download(); } }] });
+      } else if (s.state === "available") {
+        toast(wsT(canaryAct ? "js.update.canary.available" : "js.update.available", v) + (s.skipped ? " " + wsT("js.update.skipped") : ""), { sticky: true, dismiss: close, actions:
           (page ? pageAct : [{ label: wsT("js.update.install"), run: function () { api.download(); } }]).concat(
           [{ label: wsT("js.update.skip"), run: function () { api.skip(v); } }]) });
       } else if (s.state === "downloading") toast(wsT("js.update.downloading", v), { sticky: true });
       else if (s.state === "ready") {
-        toast(wsT("js.update.ready", v), { sticky: true, dismiss: close, actions: [
+        toast(wsT(back ? "js.update.stable.ready" : "js.update.ready", v), { sticky: true, dismiss: close, actions: [
           { label: wsT("js.update.restart"), run: function () { api.restart(); } }] });
-      } else if (s.state === "current") toast(wsT("js.update.current", v));
-      else if (s.state === "error") toast(wsT("js.update.failed"), { kind: "warn" });
+      } else if (s.state === "current" && canaryAct) toast(wsT(s.limited ? "js.update.canary.limited" : "js.update.canary.none"));
+      else if (s.state === "current" && back) toast(wsT("js.update.stable.current"));
+      else if (s.state === "current") toast(wsT("js.update.current", v));
+      else if (s.state === "error") toast(wsT(canaryAct ? "js.update.canary.failed" : back ? "js.update.stable.failed" : "js.update.failed"), { kind: "warn" });
       else if (s.state === "download-error") toast(wsT("js.update.downloadfailed", m), { kind: "warn", sticky: true, dismiss: close, actions: pageAct });
       else if (s.state === "apply-error") toast(wsT("js.update.applyfailed", m), { kind: "warn", sticky: true, dismiss: close, actions: pageAct });
     });
   }
   if (!shell) trackerStart();
   desktopUpdate();
+  syncSpinnerPhases(doc);
   connect();
 })();

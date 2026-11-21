@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gofrs/flock"
+	"github.com/kang-sw/devenv/internal/wsagent"
 	"github.com/kang-sw/devenv/internal/wsdoc"
 	"github.com/kang-sw/devenv/internal/wsgit"
 	"github.com/kang-sw/devenv/internal/wskey"
@@ -546,8 +547,38 @@ func provisionWorktree(ctx context.Context, runner wsgit.Runner, env []string, r
 			branchExists = true
 		}
 		if branchExists {
-			if _, err := wtRun(ctx, runner, wtPath, noSubmoduleRecurse("switch", "--no-guess", "--", targetBranch)...); err != nil {
-				return res, err
+			recreated := false
+			if mergeRoot, _, nameRooted := parseImplBranchRoot(targetBranch); nameRooted {
+				mergeRootRef := "refs/heads/" + mergeRoot
+				if _, err := wtRun(ctx, runner, root, "show-ref", "--verify", "--quiet", mergeRootRef); err == nil {
+					ahead, behind, compareErr := branchDivergenceFromMergeRoot(wsgit.Client{Runner: runner}, root, mergeRoot, targetBranch)
+					switch {
+					case compareErr != nil:
+						res.Warnings = append(res.Warnings, fmt.Sprintf("could not classify target branch %q against encoded merge root %q; it was preserved: %v", targetBranch, mergeRoot, compareErr))
+					case ahead == 0 && behind > 0:
+						ref := "refs/heads/" + targetBranch
+						for _, entry := range entries {
+							if filepath.Clean(entry.Path) != filepath.Clean(wtPath) && entry.Branch == ref {
+								return res, fmt.Errorf("worktree.acquire: stale target branch %q is checked out at %s; release that checkout and re-acquire (the branch and both worktrees were left intact)", targetBranch, entry.Path)
+							}
+						}
+						if _, err := wtRun(ctx, runner, wtPath, noSubmoduleRecurse("switch", "--detach", mergeRootRef)...); err != nil {
+							return res, fmt.Errorf("worktree.acquire: detach stale target %q at encoded merge root %q: %w", targetBranch, mergeRoot, err)
+						}
+						if _, err := wtRun(ctx, runner, wtPath, "branch", "-d", "--", targetBranch); err != nil {
+							return res, fmt.Errorf("worktree.acquire: delete stale target branch %q without force: %v; release any checkout holding it and re-acquire", targetBranch, err)
+						}
+						if _, err := wtRun(ctx, runner, wtPath, noSubmoduleRecurse("switch", "-c", targetBranch, mergeRootRef)...); err != nil {
+							return res, fmt.Errorf("worktree.acquire: recreate stale target branch %q from encoded merge root %q: %w", targetBranch, mergeRoot, err)
+						}
+						recreated = true
+					}
+				}
+			}
+			if !recreated {
+				if _, err := wtRun(ctx, runner, wtPath, noSubmoduleRecurse("switch", "--no-guess", "--", targetBranch)...); err != nil {
+					return res, err
+				}
 			}
 		} else {
 			if _, err := wtRun(ctx, runner, wtPath, noSubmoduleRecurse("switch", "-c", targetBranch, base)...); err != nil {
@@ -821,11 +852,48 @@ func releaseWorktree(ctx context.Context, runner wsgit.Runner, env []string, wtP
 
 // worktreeReleaseCaller is who asks worktree.release: the caller's session
 // key (a lead's, or the worker key an acquire minted, which is a lead key
-// too), the worker key it named (empty when it named a path), and force.
+// too), the worker key it named (empty when it named a path), force, and an
+// optional daemon-wide bound-child check run under the per-worktree lock.
 type worktreeReleaseCaller struct {
-	LeadKey   string
-	WorkerKey string
-	Force     bool
+	LeadKey       string
+	WorkerKey     string
+	Force         bool
+	CheckChildren func(ctx context.Context, target string) error
+}
+
+// checkWorktreeBoundChildren refuses a non-forced worktree.release while any
+// non-closed conversation in the daemon is bound to target, naming its
+// address(es). Daemon-hosted servers query the runner directly in memory; a
+// token-bearing connection without a local runner forwards to the daemon's
+// token route and fails closed if the daemon cannot be reached.
+func (s *Server) checkWorktreeBoundChildren(ctx context.Context, target string) error {
+	var children []wsagent.BoundWorktreeChild
+	switch {
+	case s.pi.worktreeChildren != nil:
+		children = s.pi.worktreeChildren.ActiveChildrenInWorktree(target)
+	case s.piForwards():
+		var answer struct {
+			Children []wsagent.BoundWorktreeChild `json:"children"`
+		}
+		if err := s.piCall(ctx, "worktree.children", map[string]any{"worktree": target}, piForwardTimeout, &answer); err != nil {
+			return fmt.Errorf("worktree.release refuses %s: could not check bound child agents with the daemon (%v). Nothing was changed. Retry once the daemon answers, or pass force: true once you have confirmed no child is bound to this worktree", target, err)
+		}
+		children = answer.Children
+	default:
+		return nil
+	}
+	if len(children) == 0 {
+		return nil
+	}
+	parts := make([]string, 0, len(children))
+	for _, child := range children {
+		if child.State != "" {
+			parts = append(parts, fmt.Sprintf("%s (%s)", child.Address, child.State))
+		} else {
+			parts = append(parts, child.Address)
+		}
+	}
+	return fmt.Errorf("worktree.release refuses %s: non-closed child agent(s) are still bound to this worktree (%s). Nothing was changed. Wait for them to finish or close them before releasing; pass force: true only if you intend to clean the worktree while they remain open", target, strings.Join(parts, ", "))
 }
 
 // releaseWorktreeAs is releaseWorktree on behalf of caller (nil: no lease

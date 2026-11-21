@@ -166,10 +166,13 @@ naming a model.
 ### Worktree-based work mode
 
 Only when the user asks (the housekeeping worktree above excepted):
-- Per unit → `{{.McpNamespace}}/worktree.acquire` with a new branch as
-  `target_branch` (for a ticket, the one
-  `{{.McpNamespace}}/git.resolve_impl_branch` returns), instead of moving
-  this worktree's branch.
+- Per unit → resolve the target branch (for a ticket, with
+  `{{.McpNamespace}}/git.resolve_impl_branch`), then either spawn the worker
+  directly with `worktree: <destination>` or acquire that worktree and use
+  the destination-bound key the acquisition returns. A key remains bound to
+  the worktree where it was minted and is never rebound; handing an existing
+  child another worktree without a destination-bound key cannot authorize ws
+  writes there.
 - Release that worktree before merging its branch, or when the unit ends
   unmerged.
 

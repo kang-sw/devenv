@@ -1,5 +1,5 @@
 ---
-title: Sage gate keeps a stale skipped design posture after the knob changes
+title: "노브 변경 후에도 sage gate가 오래된 skipped design 상태를 유지하는 문제"
 ---
 
 # Sage gate keeps a stale skipped design posture after the knob changes

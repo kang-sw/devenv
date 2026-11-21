@@ -22,13 +22,12 @@ import (
 )
 
 // The dashboard daemon's session page, read through DashboardSessionSource:
-// the board and its panels rendered with the static page's templates under
+// the board and its panels rendered as fragments under
 // the served-page link rule (a file link is an action link for the page's
 // link menu, opening the file view inside the session's project root; a
 // board image inside the root is the image route's URL, relayed through the
 // host page into a topic body's sandboxed frame, and path text otherwise),
-// the mail
-// correspondents, and the mailbox history bodies.
+// the mail correspondents, and the mailbox history bodies.
 // Everything here reaches a browser, so no returned field may carry the
 // session key.
 
@@ -221,12 +220,10 @@ func (src *DashboardSessionSource) renderBoard(key string, record sessionRecord,
 // boardMemoBase fingerprints the board render's inputs that are not files
 // it names: the board's update sequence (every store write bumps it), the
 // todo and agenda contents the panels read (they sit outside the board
-// state, and Seq covers them only when the board's refresh after their
-// write succeeds), the language, the mailbox listening marker's presence,
+// state and are fingerprinted independently), the language, the mailbox listening marker's presence,
 // process, and that process's liveness (an armed wait shows only while it
 // runs), the re-ask times, and replies, the session's reply-registry print
-// (replyPrint). The mailbox owner and identity are not in it: the served
-// page never sets them (servedWhiteboardPanels).
+// (replyPrint).
 func boardMemoBase(key string, record sessionRecord, lang string, reasked map[int]int64, replies string) string {
 	h := sha256.New()
 	fmt.Fprint(h, boardMemoSharedBase(key, record, lang, reasked, replies))
@@ -278,7 +275,7 @@ func (src *DashboardSessionSource) renderBoardTopics(key string, record sessionR
 	src.boards.mu.Unlock()
 	out := boardRender{imagePaths: images, imageRevision: record.boardRevision}
 	// BuildView only reads the state: the served page never begins a render
-	// or writes a file, so the stored board and the static page are untouched.
+	// or writes a file, so the stored board is untouched.
 	// The ticket files the panels list, the ticket status directories the
 	// topic badges resolve against, and the file images a topic body shows
 	// change without a nudge, so the page names them (PageContent.Watch).
@@ -512,7 +509,6 @@ func servedWhiteboardPanels(record sessionRecord, key, replyID, lang string, wat
 		root:       record.Root,
 		sessionKey: key,
 		replyID:    replyID,
-		served:     true,
 		lang:       lang,
 		watch:      watch,
 		history:    history,
@@ -528,7 +524,7 @@ func (src *DashboardSessionSource) ReadContacts(reg wsdashboard.Registration) ([
 
 // servedFileText shows a file path an item's markdown names as text on a
 // served page, taking a relative path from the session root the way
-// whiteboardItemFileLink does: a relative path is shown cleaned, an absolute
+// the session root requires: a relative path is shown cleaned, an absolute
 // path inside root relative to root, and any other absolute path as is, all
 // with forward slashes.
 func servedFileText(root string) func(string) string {

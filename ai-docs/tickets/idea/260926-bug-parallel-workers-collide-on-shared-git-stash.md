@@ -1,5 +1,5 @@
 ---
-title: Parallel ticket workers collide on the repository-wide git stash
+title: "병렬 티켓 워커들이 저장소 전역 git stash에서 충돌하는 문제"
 ---
 
 # Parallel ticket workers collide on the repository-wide git stash

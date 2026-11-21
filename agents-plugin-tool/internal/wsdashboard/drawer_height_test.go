@@ -10,12 +10,12 @@ func TestDrawerRoomResizeFrame(t *testing.T) {
 	runTrackerNode(t, "drawer room resize frame", `
 var bad = [], frames = [], deliveries, watched = [], calls = [], width = 178;
 function check(what, got, want) { if (JSON.stringify(got) !== JSON.stringify(want)) bad.push(what + ': got ' + JSON.stringify(got) + ', want ' + JSON.stringify(want)); }
-var window = { ResizeObserver: true }, drawer = { isConnected: true, open: true }, drhandle = {}, gitRegion = {};
+var window = { ResizeObserver: true }, drawer = { isConnected: true, open: true }, drhandle = {}, thandle = {}, gitRegion = {};
 function ResizeObserver(fn) { deliveries = fn; this.observe = function (n) { watched.push(n); }; }
 function requestAnimationFrame(fn) { frames.push(fn); return frames.length; }
 function drRoom() { calls.push(width); }
 `+observer+`
-check('both handles are watched', watched.length, 2);
+check('the panels, ticket map and git handles are watched', watched.length, 3);
 deliveries(); deliveries(); deliveries();
 check('a resize burst queues one frame without writing the header', [frames.length, calls], [1, []]);
 width = 167; drawer.open = false;
@@ -43,7 +43,7 @@ func TestDrawersUseFixedMaximum(t *testing.T) {
 // The standalone runner executes these fixtures without spawning child processes.
 const drawerFixedMaxNode = `
 var fs = require('fs'), vm = require('vm'), bad = [];
-function read(name) { return fs.readFileSync('assets/' + name, 'utf8'); }
+function read(name) { return name === 'tracker.js' ? require('./testdata/asset-source.cjs').readAssetSource('wsdashboard', name) : fs.readFileSync('assets/' + name, 'utf8'); }
 function check(what, got, want) { if (JSON.stringify(got) !== JSON.stringify(want)) bad.push(what + ': got ' + JSON.stringify(got) + ', want ' + JSON.stringify(want)); }
 function funcs(src, names) {
   return names.map(function (name) {

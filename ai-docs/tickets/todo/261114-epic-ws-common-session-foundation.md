@@ -1,5 +1,5 @@
 ---
-title: "Common session foundation: hosted-first harness common-ization through a capability catalog"
+title: "공통 세션 기반: 역량 카탈로그를 통한 hosted 우선 하네스 공통화"
 sage-review-design: required
 related:
   261110-epic-ws-dashboard-agent-host: "existing hosted-agent product scope; this epic supplies a shared foundation without replacing its child plans"
@@ -32,7 +32,8 @@ Delivery is four stages:
    - Compaction becomes a common command delivered from outside the harness.
    - `ws/agent.*` multi-level delegation; native subagents are removed in hosted
      sessions (leads and workers).
-   - Single session holder (prerequisite of `ws/exec`), then `ws/exec`.
+   - `ws/exec` starts with one holder per job; the single session holder is an
+     idea-only future consolidation, not a prerequisite.
    - Move plugin/extension features into the daemon: MCP plus injection,
      playbooks instead of skills, `prompts/list` slash commands.
    - The Claude CLI plugin is frozen; the Pi extension is retired after hosted
@@ -44,10 +45,10 @@ Delivery is four stages:
    reasoning, and `ws/agent.*` session lightweighting (the long-term cost answer
    from (06)).
 
-Working order (owner 2026-11-17 22:10, (70)=b, (69)): catalog -> Codex ->
-Antigravity -> single session holder -> exec, with Pi last; (70)=b moves the
-stage-3 Codex and Antigravity adapters ahead of the stage-2 single session
-holder and exec.
+Working order (owner 2026-11-17 22:10, (70)=b, (69), superseded for the holder
+dependency by owner (1872)=a on 2026-11-20): catalog -> Codex -> Antigravity ->
+exec, with Pi last. Exec starts with per-job holders; the single session holder
+is no longer on the prerequisite path.
 
 Independent, not stage-bound: the mailbox in-memory-first store. It gates the
 agent-tools ticket's Phase 2 (mail routing to daemon-owned addresses), per the
@@ -81,10 +82,15 @@ Stage 2 (hosted-first migration, reference implementation Claude):
   `mailbox.send`, in-memory routing for daemon-owned addresses, relation from
   lineage, native subagent removal in hosted Claude sessions (leads and
   workers).
-- `261117-feat-ws-single-session-holder` - PC-wide holder; prerequisite of exec.
-- `261117-feat-ws-exec-tools` - `ws/exec.*` under the single holder; native
-  process-tool removal; never-auto-terminate rule. Prerequisite:
-  `261117-feat-ws-single-session-holder`.
+- `261117-feat-ws-single-session-holder` - idea-only PC-wide holder
+  consolidation; no longer a prerequisite of exec (owner (1872)=a,
+  2026-11-20).
+- `261120-research-ws-daemon-supervision-http-attach` - stage-2 research into a
+  long-lived daemon supervisor and direct HTTP MCP attachment for user-started
+  sessions; separable from holder consolidation.
+- `261117-feat-ws-exec-tools` - `ws/exec.*` with one holder per job, reusing the
+  landed holder-per-process model; native process-tool removal and the
+  never-auto-terminate rule. The single session holder is not a prerequisite.
 - `261117-feat-ws-exec-mux-terminal` - stage 2, after exec tools: PTY screen
   sessions (`exec.shell(mux: true)`, `exec.mux.read`) ((51)=a). Prerequisite:
   `261117-feat-ws-exec-tools`.
@@ -106,14 +112,13 @@ Stage 2 (hosted-first migration, reference implementation Claude):
   split the oversized `agents-plugin-tool/internal/wsagent` sources this epic
   grew past the 1000-line size guard (`agent_tools_test.go`, `runner_conv.go`,
   with the earlier `runner.go`, `claude.go`, `pi.go`, `children.go`,
-  `lead_claude_test.go`, `lead_fake_test.go`). Owner (94)=a: defer to this
+  `lead_claude_test.go`, `lead_fake_test.go`), plus
+  `agents-plugin-tool/internal/wsdashboard/daemon.go` (1010 lines after
+  `dec0d7d6a`; owner (1874), 2026-11-20). Owner (94)=a: defer to this
   follow-up and do not raise the `.gitattributes` threshold.
 - Planned (not yet cut): the remaining plugin/extension moves into the daemon
   (playbooks instead of skills, `prompts/list` slash commands); open questions
   are in `261116-research-ws-hosted-session-first-tier`.
-- Planned (not yet cut): Pi extension retirement, after hosted parity, with
-  per-item approval. Its parity criteria are an open question in the research
-  ticket.
 
 Stage 3 (tier-1 harnesses; each prerequisite: the catalog ticket):
 
@@ -123,8 +128,12 @@ Stage 3 (tier-1 harnesses; each prerequisite: the catalog ticket):
 - `261117-feat-ws-hosted-antigravity-adapter` - Antigravity after Codex; revives
   the dropped `261114-feat-ws-hosted-antigravity-acp-adapter` as a new stem;
   account access confirmed (owner 2026-11-17 22:10).
-- Planned (not yet cut): the Pi hosted backend as a port of the Codex adapter and
-  catalog profile (25), last.
+- `261120-feat-ws-pi-common-interface-rebuild` - late-stage Pi child, after
+  Claude, Codex, and agy complete the common hosted interface: rebuild Pi from
+  scratch as its backend adapter, fit beneath the unchanged daemon application
+  layer, MCP tools, and prompt assembly, and retire the existing Pi extension
+  through a separately settled transition/compatibility gate (owner directive,
+  2026-11-20). This supersedes the prior planned Codex-adapter port (25).
 
 Stage 4 (extensions):
 
@@ -172,7 +181,7 @@ Foundation prerequisite for every extension below is already met
 | Live reasoning | Not yet authored | No additional prerequisite settled |
 | Audit (capture, store, API) | `261119-epic-ws-conversation-audit` children 1-4 | Store: `261119-epic-ws-daemon-sqlite-storage` precedent ((1331)=a); order inside the sub-epic |
 | Audit UI | `261119-feat-ws-dashboard-audit-view` | `261119-feat-ws-audit-query-api` and `261119-feat-ws-audit-capture-harness-adapters#phase1` |
-| Exec | `261117-feat-ws-exec-tools` | `261117-feat-ws-single-session-holder` |
+| Exec | `261117-feat-ws-exec-tools` | No open single-holder prerequisite; starts with per-job holders using the done `261120-refactor-ws-agent-workers-under-holders` pattern |
 
 ## Cross-Child Decisions
 
@@ -189,8 +198,10 @@ Board IDs `(NN)` refer to the 2026-11-17 lead-discuss session; earlier IDs
   Antigravity, Pi. Pi is driven only with GPT models, so the Pi hosted backend is
   a port of the Codex adapter and catalog profile, not a separate Pi-first design.
   Recorded as assumed-ok by the lead; the owner may veto. The working order
-  across stages is catalog -> Codex -> Antigravity -> single session holder ->
-  exec, with Pi last ((70)=b, (69), 2026-11-17 22:10).
+  across stages is catalog -> Codex -> Antigravity -> exec, with Pi last
+  ((70)=b, (69), 2026-11-17 22:10; holder dependency superseded by owner
+  (1872)=a, 2026-11-20). Exec starts with per-job holders; the single session
+  holder is idea-only.
 - **Codex and Antigravity are both tier-1 hosted harnesses (02).** The Codex
   protocol is the app-server (owner answered (03), 2026-11-17 22:10,
   superseding the unconfirmed (799)=a); Antigravity account access is
@@ -227,11 +238,13 @@ Board IDs `(NN)` refer to the 2026-11-17 lead-discuss session; earlier IDs
   Runner spawn record ((84)=a), and every child gets one worker-role ws tool
   loadout whose mutating tools the daemon refuses for read-only ((85)=c). Native subagents are removed in hosted sessions (leads and
   workers) (29)=ok.
-- **Single holder and exec (16), (17)=a, (18), (19)=a.** One PC-wide holder with
-  one daemon connection serves conversations and exec jobs; exec output lives in
-  a holder memory ring, no files. Exec is daemon-approved and replaces native
-  process tools in hosted leads. A session with live children or jobs is never
-  auto-terminated; explicit close cascades deepest-first.
+- **Holder and exec (16), (17)=a, (18), (19)=a; superseded in part by owner
+  (1872)=a, 2026-11-20.** Exec begins with one holder per job, following the
+  landed holder-per-process model; a PC-wide single holder is idea-only future
+  consolidation and not a prerequisite. Exec output lives in holder memory, no
+  files. Exec is daemon-approved and replaces native process tools in hosted
+  leads. A session with live children or jobs is never auto-terminated;
+  explicit close cascades deepest-first.
 - **Release-gate file-touch rule (owner, 2026-11-17).** Minimize daemon file
   touches at the root; files for backup/restore only; deltas (append) not
   rewrites; no heartbeat rewrites; no per-event O(N) rereads; interactive paths

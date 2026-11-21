@@ -18,6 +18,18 @@ func TestInlineCapsulesBehavior(t *testing.T) {
 	t.Log(string(out))
 }
 
+func TestComposerInlineWireAndHelpers(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not installed")
+	}
+	out, err := exec.Command(node, "testdata/composer-inline.test.cjs").CombinedOutput()
+	if err != nil {
+		t.Fatalf("inline composer wire and helpers: %v\n%s", err, out)
+	}
+	t.Log(string(out))
+}
+
 func TestInlineCapsulesPageAndDraftOwners(t *testing.T) {
 	script, err := dashboardTestAsset("assets/dashboard.js")
 	if err != nil {

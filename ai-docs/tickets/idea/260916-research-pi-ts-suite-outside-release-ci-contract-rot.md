@@ -1,5 +1,5 @@
 ---
-title: agents-plugin-pi TS suite is outside release CI, so its contract tests rot unnoticed
+title: "agents-plugin-pi TS 테스트 스위트가 릴리스 CI 밖에 있어 계약 테스트 부식이 감지되지 않는 문제"
 related:
   260915-feat-ws-rationale-query-and-prior-decisions: the tool addition that pushed the stale bridge.test.ts contract from 56 to 57
 ---

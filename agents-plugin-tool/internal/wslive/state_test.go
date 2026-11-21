@@ -597,9 +597,10 @@ func TestStatusEventReplacesUsage(t *testing.T) {
 		t.Fatal("usage present before any status event")
 	}
 	res := mustApply(t, st, Event{Kind: KindStatus,
-		Context: &UsageContext{Tokens: i64p(45_000), Window: 100_000, CacheHit: f64p(92.5)},
-		Limits:  []UsageLimit{{Kind: LimitSevenDay, Percent: 17, ResetsAt: 9_000}, {Kind: LimitFiveHour, Percent: 42, ResetsAt: 8_000}},
-		Cost:    &UsageCost{USD: 1.5},
+		Context:    &UsageContext{Tokens: i64p(45_000), Window: 100_000, CacheHit: f64p(92.5)},
+		Limits:     []UsageLimit{{Kind: LimitSevenDay, Percent: 17, ResetsAt: 9_000}, {Kind: LimitFiveHour, Percent: 42, ResetsAt: 8_000}},
+		LimitsAsOf: 900,
+		Cost:       &UsageCost{USD: 1.5},
 	}, 1_000)
 	if !res.Changed || res.Urgent {
 		t.Fatalf("status result = %+v, want changed and not urgent", res)
@@ -611,14 +612,18 @@ func TestStatusEventReplacesUsage(t *testing.T) {
 	if len(u.Limits) != 2 || u.Limits[0].Kind != LimitFiveHour || u.Limits[1].Kind != LimitSevenDay || u.Limits[0].ResetsAt != 8_000 {
 		t.Fatalf("limits = %+v, want the 5-hour limit first", u.Limits)
 	}
+	if u.LimitsAsOf != 900 {
+		t.Fatalf("limitsAsOf = %d, want 900", u.LimitsAsOf)
+	}
 	if u.Cost == nil || u.Cost.USD != 1.5 || u.Cost.Estimate {
 		t.Fatalf("cost = %+v", u.Cost)
 	}
 
 	same := Event{Kind: KindStatus,
-		Context: &UsageContext{Tokens: i64p(45_000), Window: 100_000, CacheHit: f64p(92.5)},
-		Limits:  []UsageLimit{{Kind: LimitFiveHour, Percent: 42, ResetsAt: 8_000}, {Kind: LimitSevenDay, Percent: 17, ResetsAt: 9_000}},
-		Cost:    &UsageCost{USD: 1.5},
+		Context:    &UsageContext{Tokens: i64p(45_000), Window: 100_000, CacheHit: f64p(92.5)},
+		Limits:     []UsageLimit{{Kind: LimitFiveHour, Percent: 42, ResetsAt: 8_000}, {Kind: LimitSevenDay, Percent: 17, ResetsAt: 9_000}},
+		LimitsAsOf: 900,
+		Cost:       &UsageCost{USD: 1.5},
 	}
 	if res := mustApply(t, st, same, 2_000); res.Changed {
 		t.Fatal("an identical status event reported a change")
@@ -684,6 +689,43 @@ func TestStatusUnknownContextAndBadFigures(t *testing.T) {
 	snap.Usage.Cost.USD = 99
 	if st.Snapshot(3_000).Usage.Cost.USD != 2 {
 		t.Fatal("a snapshot shares the state's usage")
+	}
+}
+
+func TestStatusUsageCompactionDeepCopyAndNormalize(t *testing.T) {
+	st := NewState(ownerKey)
+	comp := &UsageCompaction{Soft: 110_000, Hard: 180_000, Milestones: []int64{133_333, 156_667}, AdvisoryEnabled: true}
+	mustApply(t, st, Event{Kind: KindStatus, Context: &UsageContext{Tokens: i64p(50_000), Window: 1_000_000, Compaction: comp}}, 1_000)
+
+	// Mutating the input event's Compaction/Milestones after Apply must not affect state.
+	comp.Hard = 999
+	comp.Milestones[0] = 1
+	snap1 := st.Snapshot(1_000)
+	if snap1.Usage == nil || snap1.Usage.Context == nil || snap1.Usage.Context.Compaction == nil {
+		t.Fatalf("compaction lost: %+v", snap1.Usage)
+	}
+	got := snap1.Usage.Context.Compaction
+	if got.Soft != 110_000 || got.Hard != 180_000 || !got.AdvisoryEnabled || len(got.Milestones) != 2 || got.Milestones[0] != 133_333 || got.Milestones[1] != 156_667 {
+		t.Fatalf("compaction mutated or wrong: %+v", got)
+	}
+
+	// Mutating a returned snapshot's Compaction/Milestones must not affect subsequent snapshots.
+	snap1.Usage.Context.Compaction.Soft = 42
+	snap1.Usage.Context.Compaction.Milestones[1] = 42
+	snap2 := st.Snapshot(2_000)
+	if snap2.Usage.Context.Compaction.Soft != 110_000 || snap2.Usage.Context.Compaction.Milestones[1] != 156_667 {
+		t.Fatalf("snapshot shared compaction pointer/slice: %+v", snap2.Usage.Context.Compaction)
+	}
+
+	// Negative/empty compaction normalizes to nil (omitted in JSON).
+	mustApply(t, st, Event{Kind: KindStatus, Context: &UsageContext{Tokens: i64p(1000), Window: 200_000, Compaction: &UsageCompaction{Soft: -1, Hard: 0, Milestones: []int64{0, -5}}}}, 3_000)
+	snap3 := st.Snapshot(3_000)
+	if snap3.Usage.Context.Compaction != nil {
+		t.Fatalf("empty compaction was not dropped: %+v", snap3.Usage.Context.Compaction)
+	}
+	raw, err := json.Marshal(snap3)
+	if err != nil || strings.Contains(string(raw), `"compaction"`) {
+		t.Fatalf("nil compaction should be omitted from JSON: %s", raw)
 	}
 }
 
@@ -877,5 +919,95 @@ func TestBatchViewJSONIsUnchangedByTelemetry(t *testing.T) {
 	want := `[{"epoch":"ep1","seq":1,"toolNames":["Read"],"callCount":1,"failed":0,"startedAt":1001,"endedAt":2001}]`
 	if string(raw) != want {
 		t.Fatalf("batch JSON = %s, want %s", raw, want)
+	}
+}
+
+func TestHoldingAndAliveT0RoundTripAndSeedFinished(t *testing.T) {
+	st := NewState(ownerKey)
+	if _, err := st.Apply(Event{Kind: KindAgent, Holding: true}, 50); err == nil {
+		t.Fatal("lead agent event with holding should be refused")
+	}
+	if _, err := st.Apply(Event{Kind: KindAgent, Alive: true}, 51); err == nil {
+		t.Fatal("lead agent event with alive should be refused")
+	}
+	mustApply(t, st, Event{Kind: KindAgent, AgentID: "pi:hold", AgentKind: AgentKindPi, Status: StatusDone, Holding: true, Alive: true}, 100)
+	mustApply(t, st, Event{Kind: KindAgent, AgentID: "pi:idle", AgentKind: AgentKindPi, Status: StatusDone, Alive: true}, 110)
+	mustApply(t, st, Event{Kind: KindAgent, AgentID: "native", Status: StatusDone, Holding: true, Alive: true}, 120)
+
+	raw, err := json.Marshal(st.Snapshot(200))
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), SnapshotName)
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	snap, err := ReadSnapshot(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := map[string]Agent{}
+	for _, a := range snap.Agents {
+		byID[a.ID] = a
+	}
+	if !byID["pi:hold"].Holding || !byID["pi:hold"].Alive {
+		t.Fatalf("pi:hold lost holding/alive: %+v", byID["pi:hold"])
+	}
+	if byID["pi:idle"].Holding || !byID["pi:idle"].Alive {
+		t.Fatalf("pi:idle = %+v", byID["pi:idle"])
+	}
+	if byID["native"].Holding || byID["native"].Alive {
+		t.Fatalf("non-Pi done row should clear holding/alive: %+v", byID["native"])
+	}
+
+	// T0 evidence 3: SeedFinished MUST NOT seed Holding/Alive from disk.
+	seeded := NewState(ownerKey)
+	seeded.SeedFinished(snap)
+	for _, a := range seeded.Snapshot(300).Agents {
+		if a.Holding || a.Alive {
+			t.Fatalf("SeedFinished copied liveness from disk: %+v", a)
+		}
+	}
+}
+
+func TestRetainProtectsHoldingAliveAndAncestorsUnderCap(t *testing.T) {
+	st := NewState(ownerKey)
+	// Parent is StatusDone without holding/alive, but has a running grandchild.
+	mustApply(t, st, Event{Kind: KindAgent, AgentID: "pi:root", AgentKind: AgentKindPi, Status: StatusDone}, 10)
+	mustApply(t, st, Event{Kind: KindAgent, AgentID: "pi:mid", ParentID: "pi:root", AgentKind: AgentKindPi, Status: StatusDone}, 11)
+	mustApply(t, st, Event{Kind: KindAgent, AgentID: "pi:leaf", ParentID: "pi:mid", AgentKind: AgentKindPi, Status: StatusRunning}, 12)
+	// Holding and alive-idle Pi workers arrive with StatusDone.
+	mustApply(t, st, Event{Kind: KindAgent, AgentID: "pi:hold", AgentKind: AgentKindPi, Status: StatusDone, Holding: true, Alive: true}, 13)
+	mustApply(t, st, Event{Kind: KindAgent, AgentID: "pi:idle", AgentKind: AgentKindPi, Status: StatusDone, Alive: true}, 14)
+	// Cyclic ParentID edges must not hang retain().
+	mustApply(t, st, Event{Kind: KindAgent, AgentID: "cyc-a", ParentID: "cyc-b", Status: StatusRunning}, 15)
+	mustApply(t, st, Event{Kind: KindAgent, AgentID: "cyc-b", ParentID: "cyc-a", Status: StatusDone}, 16)
+	// Exceed FinishedAgentCap to force eviction of unprotected finished rows.
+	for i := 0; i < FinishedAgentCap+4; i++ {
+		id := fmt.Sprintf("fin-%d", i)
+		mustApply(t, st, Event{Kind: KindAgent, AgentID: id, Status: StatusRunning}, int64(20+i))
+		mustApply(t, st, Event{Kind: KindAgent, AgentID: id, Status: StatusDone}, int64(100+i))
+	}
+	byID := map[string]Agent{}
+	for _, a := range st.Snapshot(200).Agents {
+		byID[a.ID] = a
+	}
+	for _, keep := range []string{"pi:root", "pi:mid", "pi:leaf", "pi:hold", "pi:idle", "cyc-a", "cyc-b"} {
+		if _, ok := byID[keep]; !ok {
+			t.Fatalf("protected agent %q was evicted under FinishedAgentCap; kept=%v", keep, byID)
+		}
+	}
+	// RunningAgentCap still bounds protected rows.
+	for i := 0; i < RunningAgentCap+5; i++ {
+		mustApply(t, st, Event{Kind: KindAgent, AgentID: fmt.Sprintf("alive-%d", i), AgentKind: AgentKindPi, Status: StatusDone, Alive: true}, int64(300+i))
+	}
+	var protectedCount int
+	for _, a := range st.Snapshot(500).Agents {
+		if a.Status == StatusRunning || a.Holding || a.Alive || a.ID == "pi:root" || a.ID == "pi:mid" || a.ID == "cyc-b" {
+			protectedCount++
+		}
+	}
+	if protectedCount > RunningAgentCap {
+		t.Fatalf("protected count %d exceeds RunningAgentCap %d", protectedCount, RunningAgentCap)
 	}
 }

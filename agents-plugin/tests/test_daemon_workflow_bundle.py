@@ -63,7 +63,7 @@ def legacy_payload(base):
 
 def copy_owner(base, identity):
     owner = base / PRODUCTS[identity]
-    for name in ("native-pi", "rsrc", "skills", "bin", "runtime.json", "config-manifest.json",
+    for name in ("native-pi", "rsrc", "skills", "bin", "runtime.json", "config-manifest.json", "agy-config-manifest.json",
                  "dashboard-config-manifest.json", ".claude-plugin", ".codex-plugin", ".mcp.json",
                  "hooks", "claude-agents"):
         source, dest = REPO / PRODUCTS[identity] / name, owner / name
@@ -127,6 +127,18 @@ class DaemonWorkflowBundleTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.base = Path(self.temp.name).resolve()
 
+    def test_ws_launch_configs_list_exact_three_existing_manifests(self):
+        root = REPO / PRODUCTS["ws"]
+        expected = ["config-manifest.json", "agy-config-manifest.json", "dashboard-config-manifest.json"]
+        for config_path, prefix in ((root / ".mcp.json", "./"),
+                                    (root / ".claude-plugin/plugin.json", "${CLAUDE_PLUGIN_ROOT}/")):
+            with self.subTest(config=str(config_path)):
+                config = json.loads(config_path.read_bytes())
+                paths = config["mcpServers"]["ws"]["env"]["WS_MCP_CONFIG_MANIFESTS"].split(";")
+                self.assertEqual(paths, [prefix + name for name in expected])
+                for name in expected:
+                    self.assertTrue((root / name).is_file(), name)
+
     def assert_package(self, root, identity):
         source = REPO / PRODUCTS[identity]
         plugin = json.loads((root / ".claude-plugin/plugin.json").read_bytes())
@@ -135,7 +147,7 @@ class DaemonWorkflowBundleTests(unittest.TestCase):
         self.assertEqual(json.loads((root / "runtime.json").read_bytes())["plugin"], identity)
         # Compare the actual config bytes, not just manifest names or marker
         # identity. wsflow must not inherit ws's permissive Claude defaults.
-        for name in ("config-manifest.json", "dashboard-config-manifest.json", "hooks/hooks.json"):
+        for name in ("config-manifest.json", "agy-config-manifest.json", "dashboard-config-manifest.json", "hooks/hooks.json"):
             self.assertEqual((root / name).read_bytes(), (source / name).read_bytes(), name)
         defaults = {item["key"]: item["default"] for item in json.loads((root / "config-manifest.json").read_bytes())["keys"]}
         self.assertEqual(defaults["claude.compaction_advisory_enabled"], identity == "ws")

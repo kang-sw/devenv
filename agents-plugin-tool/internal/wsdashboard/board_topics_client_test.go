@@ -29,7 +29,9 @@ function isPeer() { return false; }
 function q(sel, el) { return el ? el.querySelectorAll(sel) : [indicator]; }
 var pinBox = new E(null,null,"pins");
 window.WsCards = {
- pinList:function() { return pinBox; },
+ docked:function() { return pinBox.children.slice(); },
+ isDocked:function(n) { return n.parentNode===pinBox; },
+ wrap:function() {},
  weave:function(want) { return {pins:want.filter(function(n) { return topicKey(n)==="B"; }),board:want.filter(function(n) { return topicKey(n)!=="B"; })}; },
  settle:function(el,p) { el.children=p.board; pinBox.children=p.pins; p.board.forEach(function(n) { n.parentNode=el; }); p.pins.forEach(function(n) { n.parentNode=pinBox; }); }
 };

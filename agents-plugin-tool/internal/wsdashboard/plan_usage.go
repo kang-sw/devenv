@@ -2,6 +2,7 @@ package wsdashboard
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"math"
@@ -25,9 +26,13 @@ type planUsageWindow struct {
 	Percent  float64 `json:"percent"`
 	ResetsAt int64   `json:"resetsAt,omitempty"`
 	AsOf     int64   `json:"asOf"`
+	Disabled bool    `json:"disabled,omitempty"`
 }
 type planUsageEntry struct {
 	Harness string            `json:"harness"`
+	Group   string            `json:"group,omitempty"`
+	Label   string            `json:"label,omitempty"`
+	Pending bool              `json:"pending,omitempty"`
 	Plan    string            `json:"plan,omitempty"`
 	Source  string            `json:"source,omitempty"`
 	Status  string            `json:"status,omitempty"`
@@ -43,11 +48,33 @@ type planUsageStore struct {
 	lastQuery   time.Time
 	// lastSaved holds the last successfully written cache bytes, guarded by mu.
 	lastSaved []byte
-	// probing marks the one background probe in flight; probes lets tests
-	// wait for it. Both are guarded by mu.
-	probing bool
-	probes  sync.WaitGroup
-	hist    planUsageHistoryMemo
+	// probing marks the one background probe in flight; probes lets tests and
+	// daemon shutdown wait for it. closed and lifetimeCtx/lifetimeCancel tie
+	// background probes to the owning daemon's lifetime. Guarded by mu.
+	probing        bool
+	probes         sync.WaitGroup
+	lifetimeCtx    context.Context
+	lifetimeCancel context.CancelFunc
+	closed         bool
+	hist           planUsageHistoryMemo
+	codexHist      planUsageHistoryMemo
+	// agy state is kept separate from Claude/Codex so plan-usage.json and
+	// plan-usage-history.json stay byte-identical (T0). All fields below
+	// except resolveAgy, agyDebounce, agyTimeout, agyEnv, and now are guarded by mu.
+	resolveAgy     func() (string, []string, error)
+	agyGroups      []planUsageEntry
+	agyLastSaved   []byte
+	agyLastProbe   time.Time
+	agyProbing     bool
+	agyProbed      bool
+	agyAuthHold    bool
+	agyBilledLatch bool
+	agyStatus      string
+	agyHist        planUsageHistoryMemo
+	agyDebounce    time.Duration
+	agyTimeout     time.Duration
+	agyEnv         []string
+	now            func() time.Time
 	// Request dependencies are private test seams, not configuration knobs.
 	// Production always uses the fixed HTTPS origin below for both readers.
 	usageURL string
@@ -56,7 +83,7 @@ type planUsageStore struct {
 	// os.Stat/os.ReadFile.
 	statFile func(string) (os.FileInfo, error)
 	readFile func(string) ([]byte, error)
-	// Write seam for both usage files; nil means writePrivateFile.
+	// Write seam for all usage files; nil means writePrivateFile.
 	writeFile func(dir, name string, data []byte) error
 	// detected memoizes detect() by the credential files' stats. Guarded by mu.
 	detected usageDetectMemo
@@ -85,7 +112,16 @@ func (s *planUsageStore) write(name string, data []byte) error {
 }
 
 func newPlanUsageStore(dir, home string, getenv func(string) string) *planUsageStore {
-	s := &planUsageStore{dir: dir, home: home, getenv: getenv, usageURL: "https://chatgpt.com/backend-api/wham/usage", client: &http.Client{Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
+	lifeCtx, lifeCancel := context.WithCancel(context.Background())
+	s := &planUsageStore{
+		dir:            dir,
+		home:           home,
+		getenv:         getenv,
+		lifetimeCtx:    lifeCtx,
+		lifetimeCancel: lifeCancel,
+		usageURL:       "https://chatgpt.com/backend-api/wham/usage",
+		client:         &http.Client{Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
+	}
 	var saved struct {
 		Claude planUsageEntry `json:"claude"`
 		GPT    planUsageEntry `json:"gpt"`
@@ -93,7 +129,52 @@ func newPlanUsageStore(dir, home string, getenv func(string) string) *planUsageS
 	if raw, err := os.ReadFile(filepath.Join(dir, planUsageCache)); err == nil && json.Unmarshal(raw, &saved) == nil {
 		s.claude, s.gpt = saved.Claude, saved.GPT
 	}
+	s.loadAgyLocked()
 	return s
+}
+
+// beginClose marks the store closed and cancels its daemon-lifetime context so
+// no new probe starts, in-flight probes terminate, and no further writes occur.
+func (s *planUsageStore) beginClose() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.closed = true
+	cancel := s.lifetimeCancel
+	s.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
+// waitClose waits for in-flight background probes until they finish or ctx
+// expires. Call beginClose first so no new probe can join probes.
+func (s *planUsageStore) waitClose(ctx context.Context) {
+	if s == nil {
+		return
+	}
+	done := make(chan struct{})
+	go func() {
+		s.probes.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-ctx.Done():
+	}
+}
+
+func (s *planUsageStore) close(ctx context.Context) {
+	s.beginClose()
+	s.waitClose(ctx)
+}
+
+func (s *planUsageStore) nowTime() time.Time {
+	if s != nil && s.now != nil {
+		return s.now()
+	}
+	return time.Now()
 }
 func (s *planUsageStore) saveLocked() {
 	raw, err := json.Marshal(struct {
@@ -116,7 +197,11 @@ func (s *planUsageStore) pushClaude(snap *wslive.Snapshot) {
 	}
 	// A status without limits is not a complete usage response. Invalid
 	// figures likewise cannot safely establish which windows are absent.
-	if snap.UpdatedAt <= 0 || len(snap.Usage.Limits) == 0 {
+	observedAt := snap.Usage.LimitsAsOf
+	if observedAt <= 0 {
+		observedAt = snap.UpdatedAt
+	}
+	if observedAt <= 0 || len(snap.Usage.Limits) == 0 {
 		return
 	}
 	for _, v := range snap.Usage.Limits {
@@ -126,7 +211,7 @@ func (s *planUsageStore) pushClaude(snap *wslive.Snapshot) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if snap.UpdatedAt < s.claude.AsOf {
+	if observedAt < s.claude.AsOf {
 		return
 	}
 	// Sessions disagree near a window boundary: a stale one still reports the
@@ -156,7 +241,7 @@ func (s *planUsageStore) pushClaude(snap *wslive.Snapshot) {
 		if (v.Kind != wslive.LimitFiveHour && v.Kind != wslive.LimitSevenDay) || !validUsage(v.Percent) {
 			continue
 		}
-		next := planUsageWindow{Kind: v.Kind, Percent: v.Percent, ResetsAt: v.ResetsAt, AsOf: snap.UpdatedAt}
+		next := planUsageWindow{Kind: v.Kind, Percent: v.Percent, ResetsAt: v.ResetsAt, AsOf: observedAt}
 		if next.AsOf <= 0 || !live(next.ResetsAt) {
 			continue
 		}
@@ -166,12 +251,13 @@ func (s *planUsageStore) pushClaude(snap *wslive.Snapshot) {
 		}
 		if i < len(s.claude.Windows) {
 			old := s.claude.Windows[i]
-			// Reset is the window identity. Never resurrect an older window or
-			// decrease usage within one, even when another session reports later.
-			if next.ResetsAt < old.ResetsAt || (next.ResetsAt == old.ResetsAt && next.Percent <= old.Percent) {
+			if next.AsOf < old.AsOf {
 				continue
 			}
-			if next.AsOf < old.AsOf {
+			// Equal-time duplicate reports keep the old monotonic tie-breaker.
+			// A strictly newer observation is authoritative even when an account
+			// switch makes its reset earlier or its percentage lower.
+			if next.AsOf == old.AsOf && (next.ResetsAt < old.ResetsAt || (next.ResetsAt == old.ResetsAt && next.Percent <= old.Percent)) {
 				continue
 			}
 			s.claude.Windows[i] = next
@@ -185,8 +271,8 @@ func (s *planUsageStore) pushClaude(snap *wslive.Snapshot) {
 		}
 	}
 	if changed {
-		if snap.UpdatedAt > s.claude.AsOf {
-			s.claude.AsOf = snap.UpdatedAt
+		if observedAt > s.claude.AsOf {
+			s.claude.AsOf = observedAt
 		}
 		s.claude.Harness = "claude"
 		s.claude.Source = "Claude push"
@@ -312,7 +398,7 @@ func (s *planUsageStore) entries() []planUsageEntry {
 	plan, codex, pi := s.detect()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	now := time.Now().UnixMilli()
+	now := s.nowTime().UnixMilli()
 	out := []planUsageEntry{}
 	if plan != "" || len(s.claude.Windows) > 0 {
 		c := s.claude
@@ -325,6 +411,7 @@ func (s *planUsageStore) entries() []planUsageEntry {
 		x.Harness = "codex"
 		out = append(out, currentUsage(x, now))
 	}
+	out = append(out, s.agyEntriesLocked(now)...)
 	return out
 }
 
@@ -358,7 +445,17 @@ func (d *Daemon) handlePlanUsage(w http.ResponseWriter, r *http.Request) {
 	entries := d.planUsage.entries()
 	body := map[string]any{"entries": entries, "warnPercent": bandWarnPercent, "critPercent": bandCritPercent}
 	if r.URL.Query().Get("history") == "1" {
-		body["history"] = d.planUsage.historyView(entries, time.Now().UnixMilli())
+		now := d.planUsage.nowTime().UnixMilli()
+		body["history"] = d.planUsage.historyView(entries, now)
+		if codexHist, ok := d.planUsage.codexFiveHourHistoryView(entries, now); ok {
+			body["codexFiveHourHistory"] = codexHist
+		}
+		for _, e := range entries {
+			if e.Harness == "agy" {
+				body["agyHistory"] = d.planUsage.agyHistoryView(entries, now)
+				break
+			}
+		}
 	}
 	_ = json.NewEncoder(w).Encode(body)
 }

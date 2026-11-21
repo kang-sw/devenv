@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/kang-sw/devenv/internal/wsi18n"
 )
 
 // The initial history view holds at least the bottom 1000px (whole rows,
@@ -27,10 +29,16 @@ func TestHistoryInitialWindowBrowser(t *testing.T) {
 		for i := 0; i < n; i++ {
 			mustApply(t, st, fmt.Sprintf(`<wb:topic name="t"><wb:log>log %d: a reasonably long line of text for the history window</wb:log></wb:topic>`, i))
 		}
-		page, err := RenderPage(BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "win", Location: time.UTC}))
+		view := BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "win", Location: time.UTC})
+		regions, err := RenderRegions(view)
 		if err != nil {
 			t.Fatal(err)
 		}
+		assets, err := PageAssets()
+		if err != nil {
+			t.Fatal(err)
+		}
+		page := `<!DOCTYPE html><html><head><style>` + string(assets.CSS) + `</style></head><body>` + string(assets.Sprite) + `<main>` + string(regions.Board) + `</main><aside>` + string(regions.Panels) + `</aside><script>` + string(wsi18n.Script(view.Lang)) + `</script><script>` + string(assets.AnswersScript) + `</script><script>(function(){` + string(assets.FormScript) + `})();</script></body></html>`
 		path := filepath.Join(dir, name)
 		if err := os.WriteFile(path, []byte(page), 0o600); err != nil {
 			t.Fatal(err)
