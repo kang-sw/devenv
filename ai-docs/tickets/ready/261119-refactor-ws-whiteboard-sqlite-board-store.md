@@ -877,3 +877,98 @@ Verification, on a traced single `whiteboard.update` (the Phase 1 scenario):
 - No fsync on the response path (Rule 5).
 - Every remaining gap is listed per Rule 8 with its measured cost. A gap fails
   the phase unless the owner approves it.
+
+### Result (b83c9b543) - 2026-11-21
+
+VERIFIED on macOS 26.6.2 arm64 with Go 1.26.2. Each run issued ten
+`whiteboard.update` calls using Phase 1's one-topic panel-and-log input. The
+first row is a fresh board and the steady sample has nine updates. The
+before run used an archive of the merged, post-retirement `2d528c09b` source.
+The after run used the implementation at `d1f6f4448` with the expanded harness.
+These runs supplement the original Phase 1 measurement.
+
+| Per action | Before, folder | After, SQLite |
+|---|---:|---:|
+| First update wall time | 91.926 ms | 32.224 ms |
+| Steady wall time p50 / p95 | 63.651 / 76.655 ms | 1.252 / 2.325 ms |
+| First update `wsstate` wrapper operations | 96 | 58 |
+| Steady `wsstate` wrapper operations p50 / p95 | 103 / 103 | 19 / 19 |
+
+- VERIFIED. The per-tool wrapper totals include session-key and other caller
+  I/O. Every SQLite steady action had 7 instrumented reads and 12 stats across
+  the fixture. The standalone changed and unchanged `BoardDB.Update` actions
+  each recorded zero `wsstate` wrapper operations. These counters leave direct
+  Go file operations, flock, SQLite VFS activity, and fsync unmeasured.
+  `wsstate/file_io_counts.go:13-43`, `mcp/whiteboard_measurement_test.go:83,408`.
+- VERIFIED. In the board directory, every steady update added one WAL commit
+  marker. Eight added 7 frames and 28,840 bytes each. The last added 10
+  frames and 41,200 bytes. There were zero WAL header resets in the nine
+  steady actions and no final file changes outside the WAL. The first update
+  added 23 frames and 2 markers, covering SQLite schema and board creation.
+  The separate store mutation added 1 frame, 1 marker and 4,120 bytes.
+  A genuinely unchanged store state added zero frames and bytes. An empty
+  MCP command advanced sequence metadata and added 1 frame. There were no
+  derived page or stamp changes. `mcp/whiteboard_measurement_test.go:83,178,240,408`.
+- VERIFIED. Ten additional paired samples over the same MCP input forced
+  PASSIVE after each steady update. All ten subsequent writes reset the
+  WAL header. Their p50 / p95 were 1.865 / 3.044 ms, compared with
+  1.565 / 2.624 ms for the paired steady writes and 1.252 / 2.325 ms in
+  the primary steady sample. In these samples the slowest reset write was
+  1.31 times the primary steady p95, below the owner's 10-times Forward
+  threshold. This times the whole tool action.
+  `mcp/whiteboard_measurement_test.go:455-491`.
+
+**Performance rules 1–5**
+
+- VERIFIED by source and store test. Rules 1, 3 and 4 use the held memory
+  snapshot, one board DB with WAL, and one exclusive connection for the
+  handle lifetime. The warm store API goes directly to State or the held
+  connection. The store test covers the absence of a shared-memory file.
+  Cold import and the 30-minute idle reopen use filesystem operations,
+  as approved in `(1347)=c`. Exact per-action OS open, flock, and stat
+  syscall counts remain unmeasured.
+  `wswhiteboard/board_db.go:154-261,360-370,644-711`,
+  `wswhiteboard/board_db_test.go:695`, `mcp/whiteboard_registry.go:62-114,150-179`.
+- VERIFIED for Rule 2. One logical append transaction per changed steady
+  update and no transaction for identical state. SQLite writes several
+  WAL frames within some transactions. The syscall count for a physical
+  append remains unmeasured. `wswhiteboard/board_db.go:666-711`.
+- INFERRED from the pinned SQLite source for Rule 5. `synchronous=NORMAL`
+  disables ordinary per-commit WAL sync. The first write into a reused WAL
+  can sync its header after a checkpoint. The Darwin arm64 implementation
+  in `modernc.org/sqlite v1.30.2` sets the sync flags at
+  `lib/sqlite_darwin_arm64.go:41625-41644`, restarts and syncs the header
+  in `_walFrames` at `:48986-49030`, and calls `fsync` in `_full_fsync`
+  at `:29390-29425`. The board runs thresholded idle PASSIVE checkpoints
+  on a background timer. The owner accepted one header sync per reset cycle
+  under Rule 8 on 2026-11-21. The sampled cost includes any sync and other
+  work in the write. It does not isolate sync time or concurrent
+  checkpoint contention. `go.mod:11`,
+  `wswhiteboard/board_db.go:365-367,989-1025`.
+
+The owner limited verification to in-process measurement. macOS refused
+unprivileged `fs_usage`. Exact syscall counts and actual response-path
+fsync counts remain unmeasured in both directions. Windows AhnLab V3
+measurement remains deferred.
+
+VERIFIED commands from the paired source directories, plus `go vet
+./internal/mcp`, `gofmt -l`, and `git diff --check`.
+
+```sh
+# Baseline archive of 2d528c09b, from agents-plugin-tool/
+GOCACHE=/tmp/ws-go-cache WS_WHITEBOARD_MEASURE_UPDATES=10 WS_WHITEBOARD_MEASURE_LABEL=pre-switch-2d528c09b go test ./internal/mcp -run '^TestWhiteboardUpdateMeasurement$' -count=1 -v
+
+# Implementation worktree, from agents-plugin-tool/
+GOCACHE=/tmp/ws-go-cache WS_WHITEBOARD_MEASURE_UPDATES=10 WS_WHITEBOARD_MEASURE_LABEL=sqlite-d1f6f4448 go test ./internal/mcp -run '^TestWhiteboard(UpdateMeasurement|MeasurementWALDelta|StoreMeasurement|CheckpointResetMeasurement)$' -count=1 -v
+```
+
+Both opt-in runs passed, in 1.544 s and 1.060 s respectively. The
+Phase 2 directional T3 boundary and T0 ZIP results still apply.
+Phase 3 changes only the measurement harness and this Result.
+
+Lead-VERIFIED after Phase 2. The two loopback-blocked commands were
+rerun at `22a413c9f` where loopback was available. The MCP suite
+passed in 48.5 s. The dashboard suite reported the same five failures
+as `develop` at `fa3c2a039` (`TestBoardHoldPillBrowser`,
+`TestBoardStateFilterBrowser`, `TestBoardTopicUnitsBrowser`,
+`TestWhiteboardEffectsBrowser`, and `TestBoardHistoryHooksSurroundSSESwap`).
