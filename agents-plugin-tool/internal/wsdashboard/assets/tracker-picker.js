@@ -855,6 +855,7 @@
         var openSub = (openIdx.subtree[lid] || [lid]).slice().sort().join(',');
         var liveSub = ((liveIdx && liveIdx.subtree[lid]) || []).slice().sort().join(',');
         if (openSub !== liveSub) return { events: [], stale: true };
+        (openIdx.subtree[lid] || [lid]).forEach(function (mid) { touchedMembers[mid] = true; });
       }
       for (var p = 0; p < addedPeople.length; p++) {
         if (!isLiveMember(liveMembers, addedPeople[p])) return { events: [], stale: true };

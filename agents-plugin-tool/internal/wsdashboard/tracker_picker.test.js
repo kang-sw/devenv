@@ -1316,3 +1316,110 @@ test('Phase 2 round-3 review: deleted-org CC retarget to existing live org, plai
     ]);
   }
 });
+
+test('Phase 2 round-4 review: plain-lead CC subtree member CC source/exclusion drift and dispatch refusal UI handling', () => {
+  const baseVs = () => ({
+    viewer: { member: 'kim-hn', reach: { 'lee-dy': 1, 'choi-jw': 2, 'jung-mj': 2, 'kang-yr': 2, 'park-sy': 1, 'yoon-th': 2, 'han-sa': 2 } },
+    members: J(MEMBERS),
+    orgs: J(ORGS),
+    items: {
+      i1: {
+        id: 'i1', alias: 'k-1', kind: 'task', title: 'Primary', hidden: false,
+        cc: ['han-sa', 'choi-jw'],
+        orgCC: [],
+        ccSources: {
+          'han-sa': { personal: true, orgs: [] },
+          'choi-jw': { personal: true, orgs: [] },
+        },
+        ccExcluded: [],
+        assignments: [], pending: [],
+      },
+    },
+    rules: {},
+    assignments: {},
+    events: [],
+  });
+
+  // 1a. Plain-lead CC group (park-sy): han-sa in park-sy's subtree was personally CC'd at open;
+  // peer unCCs han-sa before Apply -> stale notice, sends nothing (never leaves han-sa excluded).
+  {
+    const { c, byId, dispatched } = makePickerDomHarness(baseVs());
+    c.openPicker('cc', { item: 'i1' });
+    const parkBtn = byId['tkpm-body'].querySelector('[data-pm="grp"][data-id="park-sy"]');
+    c.pmClick({ target: parkBtn, stopPropagation() {} });
+    // Concurrently unCC han-sa (now excluded, personal source removed)
+    c.VS.items.i1.cc = ['choi-jw'];
+    c.VS.items.i1.ccSources = { 'choi-jw': { personal: true, orgs: [] } };
+    c.VS.items.i1.ccExcluded = ['han-sa'];
+    c.pmApply();
+    assert.equal(dispatched.length, 0);
+    assert.equal(byId['tkpm'].open, true);
+    assert.equal(byId['tkpm-err'].textContent, 'js.tk.pm.stale');
+    assert.equal(byId['tkpm-err'].hidden, false);
+  }
+
+  // 1b. Peer unCC of an untouched member OUTSIDE park-sy's subtree (choi-jw) does NOT trip stale
+  {
+    const { c, byId, dispatched } = makePickerDomHarness(baseVs());
+    c.openPicker('cc', { item: 'i1' });
+    const parkBtn = byId['tkpm-body'].querySelector('[data-pm="grp"][data-id="park-sy"]');
+    c.pmClick({ target: parkBtn, stopPropagation() {} });
+    c.VS.items.i1.cc = ['han-sa'];
+    c.VS.items.i1.ccSources = { 'han-sa': { personal: true, orgs: [] } };
+    c.VS.items.i1.ccExcluded = ['choi-jw'];
+    c.pmApply();
+    assert.equal(dispatched.length, 1);
+    assert.deepEqual(dispatched[0].events.map(e => [e.type, e.payload]), [
+      ['item.cc', { item: 'i1', member: 'park-sy' }],
+      ['item.cc', { item: 'i1', member: 'yoon-th' }],
+    ]);
+  }
+
+  // 2a. Server 409 refusal on dispatch (e.g. concurrent reporting-line change making assign target covered):
+  // modal stays open, server refusal reason is shown in #tkpm-err, selection is kept, wrote is not called.
+  {
+    const { c, byId, dispatched } = makePickerDomHarness(baseVs());
+    let wroteCalled = 0;
+    c.wrote = () => { wroteCalled++; };
+    c.AD.dispatch = (store, events, cb) => {
+      dispatched.push({ store, events: J(events) });
+      cb({ ok: false, error: 'HTTP 409', refusal: { index: 0, type: 'item.assign', reason: 'target lee-dy already covered by rule r1' } });
+    };
+    c.openPicker('assign', { item: 'i1' });
+    const sw1Btn = byId['tkpm-body'].querySelector('[data-pm="grp"][data-id="lee-dy"]');
+    c.pmClick({ target: sw1Btn, stopPropagation() {} });
+    c.pmApply();
+    assert.equal(dispatched.length, 1);
+    assert.equal(wroteCalled, 0);
+    assert.equal(byId['tkpm'].open, true);
+    assert.equal(byId['tkpm-err'].textContent, 'target lee-dy already covered by rule r1');
+    assert.equal(byId['tkpm-err'].hidden, false);
+    assert.equal(c.PM.busy, false);
+    assert.equal(c.PM.groups['lee-dy'], true);
+    const applyBtn = byId['tkpm-foot'].querySelector('#tkpm-apply');
+    assert.ok(applyBtn);
+    assert.equal(applyBtn.getAttribute('disabled'), null);
+  }
+
+  // 2b. Non-409 dispatch failure (no refusal object): modal stays open and shows res.error
+  {
+    const { c, byId, dispatched } = makePickerDomHarness(baseVs());
+    let wroteCalled = 0;
+    c.wrote = () => { wroteCalled++; };
+    c.AD.dispatch = (store, events, cb) => {
+      dispatched.push({ store, events: J(events) });
+      cb({ ok: false, error: 'HTTP 500: internal error', refusal: null });
+    };
+    c.openPicker('cc', { item: 'i1' });
+    const ohCk = byId['tkpm-body'].querySelector('[data-pm="self"][data-id="oh-sj"]');
+    c.pmClick({ target: ohCk, stopPropagation() {} });
+    c.pmApply();
+    assert.equal(dispatched.length, 1);
+    assert.equal(wroteCalled, 0);
+    assert.equal(byId['tkpm'].open, true);
+    assert.equal(byId['tkpm-err'].textContent, 'HTTP 500: internal error');
+    assert.equal(byId['tkpm-err'].hidden, false);
+    assert.equal(c.PM.busy, false);
+    assert.equal(c.PM.picks['oh-sj'], true);
+  }
+});
