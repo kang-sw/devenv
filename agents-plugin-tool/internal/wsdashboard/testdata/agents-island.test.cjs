@@ -177,8 +177,24 @@ ctx.agSwapped();
 assert.equal(badge.synced, 1);
 assert.equal(island.hidden, false);
 assert.equal(island.attrs['data-mode'], 'compact', 'holding/alive-idle forest opens compact HUD');
+assert.equal(island.attrs['data-sizing'], undefined, 'data-sizing attribute is never used');
 assert.equal(island.style.height, '56px');
 assert.equal(island.style['--ag-cw'], '140px', 'agSize uses measured natural width, not fixed 320px');
+
+// Unchanged compact tick is a zero-DOM-churn no-op on width, height, and transition
+let styleWrites = 0;
+const origW = island.style.width, origH = island.style.height, origT = island.style.transition;
+island.style = {
+  get width() { return origW; }, set width(_) { styleWrites++; },
+  get height() { return origH; }, set height(_) { styleWrites++; },
+  get transition() { return origT; }, set transition(_) { styleWrites++; },
+  '--ag-cw': island.style['--ag-cw'], '--ag-ch': island.style['--ag-ch'],
+  setProperty() { styleWrites++; }, getPropertyValue(k) { return this[k]; }
+};
+ctx.agSwapped();
+assert.equal(styleWrites, 0, 'unchanged compact agSwapped does not mutate island styles');
+assert.equal(island.attrs['data-sizing'], undefined);
+island.style = { setProperty(k, v) { this[k] = v; }, width: origW, height: origH, transition: origT, '--ag-cw': origW, '--ag-ch': origH };
 const buttons = [];
 (function walk(el) { if (el.classList?.contains('hud-node')) buttons.push(el); (el.children || []).forEach(walk); })(hudRoots);
 assert.equal(buttons.length, 4);

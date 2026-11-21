@@ -230,6 +230,11 @@ func TestHUDOrgChartBrowser(t *testing.T) {
 			next = idleOnly
 		case "single":
 			next = single
+			if cap := r.URL.Query().Get("cap"); cap != "" {
+				agents := append([]wslive.Agent(nil), single.Agents...)
+				agents[0].Caption = cap
+				next.Agents = agents
+			}
 		default:
 			next = heavy
 		}
