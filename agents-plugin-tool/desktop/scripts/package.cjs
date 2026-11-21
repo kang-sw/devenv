@@ -1,7 +1,6 @@
 'use strict';
 // Launchless Phase 2 smoke packages and signed release bundles.
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { copyPackage } = require('../../desktop-electron/daemon-stage');
@@ -47,12 +46,26 @@ function resourceMap(root) {
   return map;
 }
 
+function bundleResourceMap(resources, base, paths = path) {
+  // Tauri normalizes resource paths by dropping Windows drive prefixes.
+  // Relative sources resolve from the desktop crate, including in build.rs.
+  const entries = Object.entries(resources).map(([source, destination]) => {
+    const relative = paths.relative(base, source);
+    if (paths.isAbsolute(relative)) throw new Error(`Daemon resource is on a different drive: ${source}`);
+    return [relative.split(paths.sep).join('/'), destination];
+  });
+  return Object.fromEntries(entries);
+}
+
 function stageDaemonPackage({ input = process.env.WERKSCHAFT_DAEMON_INPUT, platform = process.platform } = {}) {
   if (!['darwin', 'win32'].includes(platform)) throw new Error('Packaging requires macOS or Windows');
   if (!input || !path.isAbsolute(input)) throw new Error('WERKSCHAFT_DAEMON_INPUT must name an absolute assembled package');
   if ((platform === 'darwin' && process.arch !== 'arm64') || (platform === 'win32' && process.arch !== 'x64'))
     throw new Error('Packaging requires darwin-arm64 or win32-x64');
-  const stage = fs.mkdtempSync(path.join(os.tmpdir(), 'werkschaft-tauri-package-'));
+  // The runner's TEMP and checkout can be on different Windows drives.
+  const target = path.join(desktop, 'target');
+  fs.mkdirSync(target, { recursive: true });
+  const stage = fs.mkdtempSync(path.join(target, 'p-'));
   try {
     const daemon = path.join(stage, 'daemon');
     const selected = copyPackage(input, daemon, 'bundled', platform);
@@ -68,7 +81,8 @@ function build(options) {
   const { stage, selected: { root: daemon }, platform } = stageDaemonPackage(options);
   try {
     const config = path.join(stage, 'tauri.conf.json');
-    fs.writeFileSync(config, JSON.stringify({ bundle: { resources: resourceMap(daemon) } }));
+    const resources = bundleResourceMap(resourceMap(daemon), desktop);
+    fs.writeFileSync(config, JSON.stringify({ bundle: { resources } }));
     const cli = require.resolve('@tauri-apps/cli/tauri.js');
     const args = [cli, 'build', '--ci', '--config', config];
     if (platform === 'darwin') args.push('--bundles', 'app', '--no-sign');
@@ -127,7 +141,8 @@ function releaseConfig({ resources, platform, version, pubkey }) {
 
 function bundleRelease(stage, daemon, platform, version, pubkey, env) {
   const config = path.join(stage, 'tauri.conf.json');
-  fs.writeFileSync(config, JSON.stringify(releaseConfig({ resources: resourceMap(daemon), platform, version, pubkey })));
+  const resources = bundleResourceMap(resourceMap(daemon), desktop);
+  fs.writeFileSync(config, JSON.stringify(releaseConfig({ resources, platform, version, pubkey })));
   const target = platform === 'darwin' ? 'aarch64-apple-darwin' : 'x86_64-pc-windows-msvc';
   // The macOS bundle path has no version. Keep concurrent local builds
   // from reading or signing another build's bundle.
@@ -245,4 +260,4 @@ if (require.main === module) {
     throw new Error('Usage: node scripts/package.cjs [--release]');
   }).catch(error => { console.error(error.message); process.exitCode = 1; });
 }
-module.exports = { build, checkBinary, resourceMap, comparePackage, releaseConfig };
+module.exports = { build, checkBinary, resourceMap, bundleResourceMap, comparePackage, releaseConfig };
