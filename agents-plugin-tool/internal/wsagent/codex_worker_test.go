@@ -231,6 +231,12 @@ func TestCodexWorkerLaunchAuthorityAndApproval(t *testing.T) {
 			if len(resumed) != 1 || resumed[0]["threadId"] != "codex-worker-session" || resumed[0]["sandbox"] != tc.sandbox || resumed[0]["approvalPolicy"] != tc.policy {
 				t.Fatalf("thread/resume: %v", resumed)
 			}
+			if resumed[0]["excludeTurns"] != true {
+				t.Fatal("thread/resume must exclude turns")
+			}
+			if report := got.list()[1]; report.Result.Status != TurnDone || report.Result.Message != "worker complete" {
+				t.Fatalf("report after cold resume without turn history: %+v", report)
+			}
 			assertCodexWorkerSafeTools(t, "thread/resume", resumed[0])
 		})
 	}

@@ -238,6 +238,8 @@ func (p *codexProcess) open(spec StartSpec) error {
 	method := "thread/start"
 	if spec.SessionID != "" {
 		params["threadId"] = spec.SessionID
+		// The open response only needs metadata, and history can exceed the stream's line limit.
+		params["excludeTurns"] = true
 		method = "thread/resume"
 	}
 	if _, err := p.call("open", method, params); err != nil {

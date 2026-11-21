@@ -60,8 +60,12 @@ func (f *codexFake) answer(holder, method string, params json.RawMessage) (strin
 		var requested struct {
 			ApprovalPolicy string `json:"approvalPolicy"`
 			Sandbox        string `json:"sandbox"`
+			ExcludeTurns   bool   `json:"excludeTurns"`
 		}
 		_ = json.Unmarshal(params, &requested)
+		if method == "thread/resume" && !requested.ExcludeTurns {
+			return "", "thread/resume must exclude turns", true
+		}
 		spawn := f.h.holders.spawned(holder)
 		token := spawn.Env[EnvMCPSessionToken]
 		f.mu.Lock()
@@ -508,6 +512,9 @@ func TestCodexLeadSyntheticCreateControlsAndResume(t *testing.T) {
 	}
 	h.holders.out(fresh, codexSyntheticEnd("t3", "resumed", "completed"))
 	h.idle(id)
+	if got := ringTexts(h.ring(id), wslive.RingReply); !slices.Equal(got, []string{"first", "resumed"}) {
+		t.Fatalf("cold resume preserves the transcript and appends the new reply: %q", got)
+	}
 }
 
 func TestCodexLeadSyntheticReattachMidTurn(t *testing.T) {
