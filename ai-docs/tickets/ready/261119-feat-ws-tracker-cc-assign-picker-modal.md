@@ -159,7 +159,7 @@ Approved mockup (owner check (1390)=ok, 2026-11-19 10:40, v2):
 ## Prior Decisions
 
 - 261119-feat-ws-tracker-org-chart-editor (2026-11-19, Decisions): "\"미배치 (리드 없음)\" group = live members with no lead and no followers, shown in a separate dashed group under the tree." — bearing: constrains
-- 261119-feat-ws-tracker-org-entity (2026-11-19, Decisions): "Org CC = new event types, T1. `item.cc_org {item, org}` / `item.uncc_org {item, org}`. Org CC is dynamic and additive, like assign rules" — bearing: constrains
+- 261119-feat-ws-tracker-org-entity (2026-11-19, Decisions): "Org CC = new event types with provenance, T1. `item.cc_org {item, org}` / `item.uncc_org {item, org}`. Org CC is dynamic and revokes on removal: `item.uncc_org` removes people who came only through that registration." — bearing: constrains
 - 261119-feat-ws-tracker-org-entity (2026-11-19, Decisions): "Org assign = hybrid `item.assign` target, T1. `{root: <current head>, org: <id>, include_root, levels}`." — bearing: constrains
 - 261111-feat-ws-tracker-cc-field (2026-11-11, Decisions): "Removing a CC is open to everyone too, symmetric with adding (technical, (279)): CC carries no duty" — bearing: constrains
 - 261111-feat-ws-tracker-assignee-edit-and-body-merge (2026-11-11, Decisions): "`item.hide` and `item.assign` stay creator-only." — bearing: constrains
@@ -210,7 +210,7 @@ Verification:
   plus one capture of a fixture 409 refusal shown inline with its reason
   and the selection kept.
 
-### Result
+### Result (8d9a77b) - 2026-11-20
 
 Landed on `impl/develop/paper-puma-plus` (a152cef07..8d9a77b2a, merged with
 develop in ffd2766a6).
@@ -240,3 +240,37 @@ defines, vacant orgs as disabled rows.
 Verification:
 - Node tests for org-target event building and vacant-org handling.
 - LOOK: fixture captures compared side by side with the full v2 mockup.
+
+### Result (7d959cb) - 2026-11-21
+
+- Enabled org targets in the ordinary CC and assign pickers (`tracker-picker.js`,
+  `tracker.css`): heads of live orgs (including 1-person orgs) show the org
+  badge, `<org> 전체 (N명)` group toggle, org-aware covered/pending tooltips,
+  and org chips in the selection band; leads without an org keep Phase 1
+  behavior (CC member snapshot, plain assign rule).
+- CC picker (`pmCcInit`, `pmCcEval`, `pmCcEvents`): selecting an org emits
+  `item.cc_org`, existing live org CC registrations open checked, and unchecking
+  emits `item.uncc_org` without emitting personal `item.uncc` on only-through
+  members (preserving personal CCs and respecting item exclusions per org-entity
+  Decision 5).
+- Assign picker (`pmAssignOrgInit`, `pmAssignLocks`, `pmAssignEval`,
+  `pmAssignEvents`): org heads emit `{root, include_root: true, org}` rule
+  targets (shared with `pmRetargetAssignEvents`); existing open org rules open
+  checked and unchecking emits `item.unassign {item, rule, root}` before new
+  `item.assign` events only for the rule author (`ru.by === viewer`, org-entity
+  Decisions 11 & 20), locking other authors' rules and preserving `assignRoot`
+  overlap locking until unchecked.
+- Vacant orgs (`pmVacantOrgs`, `pmVacantRowHtml`): live orgs with no live head
+  render as disabled rows (`공석`, `관리자가 헤드를 지정해야 선택 가능`),
+  searchable by name/id and hidden in `norule` (draft/topic) and CC
+  selected-only modes.
+- Added 14 `js.tk.pm.*` keys across all 11 locale tables under
+  `internal/wsi18n/tables/` and regenerated `ai-docs/ref/tracker-mockup/i18n-en.js`.
+  No Go code under `internal/wstracker` was modified (T1 compatibility
+  inherited, Decision 10). Updated the stale `## Prior Decisions` org-entity CC
+  quote to match settled Decision 5.
+- Verification:
+  - `node --test agents-plugin-tool/internal/wsdashboard/tracker_picker.test.js agents-plugin-tool/internal/wsdashboard/tracker_org_entity.test.js agents-plugin-tool/internal/wsdashboard/tracker_draft.test.js`: 28/28 passed (picker 12/12).
+  - `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test -count=1 ./internal/wsi18n`: pass (2.078s).
+  - `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test -count=1 -run 'TestTrackerItemWindowCC|TestTrackerMockupI18nIsCurrent|TestTrackerAssignee|TestTrackerQuickAdd|Asset' ./internal/wsdashboard`: pass (10.876s). Note: broader `-run 'Tracker|Asset'` hits pre-existing `TestTrackerRelatedScope` failure (`ReferenceError: showHidden is not defined` in `listRelated` from `f49b634e4` on `develop`, untouched here).
+  - Headless Chromium captures (dark + light, untracked under `ai-docs/assets/captures/261121/picker-org-targets/`: `cc-org-dark.png`, `cc-org-light.png`, `assign-org-dark.png`, `assign-org-light.png`, `assign-existing-uncheck-dark.png`, `assign-existing-uncheck-light.png`) verified side by side against `ai-docs/assets/mockups/261119/tracker-picker-modal/picker.html` (match, with live DOM dispatch assertions passing for `item.cc_org`, org `item.assign`, and `item.unassign`).
